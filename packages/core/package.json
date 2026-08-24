@@ -1,0 +1,73 @@
+{
+  "name": "@dianemo/core",
+  "version": "1.0.0",
+  "description": "Distribute one API rate limit across every process that spends it \u2014 cost-weighted priority queues, freeze/thaw recovery and pluggable backends",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./client/types": {
+      "types": "./dist/client/types.d.ts",
+      "default": "./dist/client/types.js"
+    },
+    "./request/types": {
+      "types": "./dist/request/types.d.ts",
+      "default": "./dist/request/types.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "npm run clean && npm run build",
+    "check": "tsc -p tsconfig.json --noEmit"
+  },
+  "keywords": [
+    "rate-limit",
+    "rate-limiter",
+    "token-bucket",
+    "distributed",
+    "axios",
+    "http-client",
+    "priority-queue",
+    "oauth2",
+    "api-client",
+    "plugin"
+  ],
+  "author": "Aaron Leman",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "axios": "^1.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.2",
+    "typescript": "^6.0.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vivo-us/dianemo.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/vivo-us/dianemo#readme",
+  "bugs": {
+    "url": "https://github.com/vivo-us/dianemo/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

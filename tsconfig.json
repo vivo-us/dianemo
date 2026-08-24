@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // Resolve cross-package imports to source, so a change in core is
+    // typechecked against the redis backend here rather than after a publish.
+    // (Paths are relative to this file; baseUrl is deprecated in TS 6.)
+    "paths": {
+      "@dianemo/core": ["./packages/core/src/index.ts"],
+      "@dianemo/backend-redis": ["./packages/backend-redis/src/index.ts"]
+    }
+  },
+  "include": ["packages/*/src/**/*", "test/**/*"],
+  "exclude": ["node_modules", "**/dist"]
+}

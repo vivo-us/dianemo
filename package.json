@@ -1,0 +1,49 @@
+{
+  "name": "dianemo",
+  "private": true,
+  "type": "module",
+  "description": "Distribute one API rate limit across every process that spends it",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "nx run-many -t build",
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p type-tests/tsconfig.json --noEmit",
+    "lint": "eslint packages/*/src test",
+    "format": "prettier --check \"{packages/*/src,test,bench,scripts}/**/*.{ts,mjs}\"",
+    "format:fix": "prettier --write \"{packages/*/src,test,bench,scripts}/**/*.{ts,mjs}\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "npm run clean --workspaces --if-present",
+    "sort-imports": "node scripts/sort-imports.mjs --dir packages && node scripts/sort-imports.mjs --dir test && node scripts/sort-imports.mjs --dir bench",
+    "sort-imports:check": "node scripts/sort-imports.mjs --check --dir packages && node scripts/sort-imports.mjs --check --dir test && node scripts/sort-imports.mjs --check --dir bench",
+    "bench": "node bench/index.mjs",
+    "release": "nx release --skip-publish",
+    "release:publish": "nx release publish",
+    "version-plan": "nx release plan",
+    "version-plan:check": "nx release plan:check",
+    "bench:list": "node bench/index.mjs --list"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@nx/js": "^23.1.1",
+    "@opentelemetry/api": "^1.9.1",
+    "@types/node": "^25.9.2",
+    "eslint": "^9.39.4",
+    "ioredis": "^5.11.1",
+    "nx": "^23.1.1",
+    "prettier": "^3.8.4",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.61.0",
+    "vitest": "^3.2.4"
+  },
+  "author": "Aaron Leman",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vivo-us/dianemo.git"
+  }
+}

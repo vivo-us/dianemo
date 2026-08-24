@@ -1,0 +1,24 @@
+name: Version Plan Check
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  check-version-plan:
+    name: Version plans cover touched packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Ask Nx — not a path grep — whether a plan is required. Only projects
+      # listed in nx.json `release.projects` count, so touching docs, the
+      # benchmark or CI does not demand one.
+      - name: Check version plans
+        run: npx nx release plan:check --base=origin/master --head=HEAD

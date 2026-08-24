@@ -1,0 +1,153 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Style and types need no services, so they fail fast and cheaply.
+  static:
+    name: Lint, format, types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Check import order
+        run: npm run sort-imports:check
+      - name: Check formatting
+        run: npm run format
+      - name: Lint
+        run: npm run lint
+      - name: Type check
+        run: npm run check
+      - name: Build
+        run: npm run build
+
+  test:
+    name: Tests (both backends)
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # The conformance suite runs against every backend, so this is the run
+      # that proves the two agree rather than merely both working.
+      - name: Test with Redis available
+        # Asserted rather than assumed: with REDIS_URL unset every Redis harness
+        # skips, so this job would pass as a duplicate of test-no-redis and take
+        # every "runs on both backends" claim with it.
+        run: |
+          test -n "${REDIS_URL:-}" || {
+            echo "::error::REDIS_URL is unset; this job would silently duplicate test-no-redis"
+            exit 1
+          }
+          npx vitest run --typecheck
+        env:
+          REDIS_URL: redis://localhost:6379
+
+  test-no-redis:
+    name: Tests (memory only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Without REDIS_URL the Redis-backed cases skip. This guards the promise
+      # that @dianemo/core is usable with no Redis anywhere in sight.
+      - name: Test with no Redis at all
+        run: npx vitest run --typecheck
+
+  packaging:
+    name: Packaging
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # A `file:` install symlinks to the source tree and silently resolves the
+      # workspace's devDependencies, so it cannot detect a missing dependency.
+      # Only a packed tarball installed into a bare project can — which is how
+      # an unimportable published package slipped through once before.
+      - name: Core installs and runs with no Redis dependency
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/pkgtest && cd packages/core
+          npm pack --pack-destination /tmp/pkgtest
+          cd /tmp/pkgtest && npm init -y >/dev/null && npm pkg set type=module
+          npm install ./dianemo-core-*.tgz
+          test ! -d node_modules/ioredis \
+            || (echo "::error::@dianemo/core pulled in ioredis" && exit 1)
+          node -e "
+            import('@dianemo/core').then(async (m) => {
+              const backend = m.memoryBackend();
+              if (backend.distributed !== false) throw new Error('memory backend must not claim to be distributed');
+              new m.default({ key: '0'.repeat(32), backend });
+              await backend.close();
+              console.log('core is importable and usable standalone');
+            });
+          "
+          cat > consumer.ts <<'TS'
+          import RequestHandler, {
+            memoryBackend,
+            type OAuth2Credentials,
+          } from '@dianemo/core';
+
+          declare module '@dianemo/core' {
+            interface ClientTemplates {
+              oauth: OAuth2Credentials;
+            }
+          }
+
+          const handler = new RequestHandler({ key: '0'.repeat(32), backend: memoryBackend() });
+          await handler.registerClientTemplate('oauth', (credentials) => ({
+            name: credentials.instanceId,
+          }));
+          await handler.addTemplateClient('oauth', {
+            instanceId: 'a',
+            baseUrl: 'https://example.test',
+            clientId: 'id',
+            clientSecret: 'secret',
+          });
+          const response = await handler.handleRequest<{ id: string }>({
+            clientName: 'default', requestName: 'consumer.typecheck', method: 'GET',
+          });
+          response.data.id satisfies string;
+          TS
+          # --skipLibCheck: this project deliberately has no @types/node, and
+          # core's published .d.ts reference NodeJS.Timeout and `events`. The
+          # check under test is that CONSUMER code compiles against the packed
+          # tarball, not that core's declarations resolve Node's globals without
+          # them being installed.
+          "$GITHUB_WORKSPACE/node_modules/.bin/tsc" --noEmit --strict --skipLibCheck \
+            --target ES2022 --module NodeNext --moduleResolution NodeNext consumer.ts
