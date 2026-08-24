@@ -183,17 +183,26 @@ CI runs all of the above, plus the test suite against both a memory and a real R
 Both backends must agree — `test/clientTypes/backendParity.test.ts` is the guard, and a change
 to one backend's semantics is expected to touch the other.
 
-### Tests read compiled core, not core's source
+### Publishing
 
-There is no path aliasing in `vitest.config.ts`, so `@dianemo/core` resolves through the
-`node_modules/@dianemo/core` symlink and lands on `packages/core/dist/index.js` — that is what
-core's `package.json` names in `main` and `exports`. The Redis backend's `ops/` layer imports
+Releases go out with `NPM_CONFIG_OTP=<code> npm run release:publish`. The one-time password has to
+arrive by environment: nx parses `--otp` with yargs, which reads the value as a number and drops a
+leading zero, so roughly one code in ten reaches npm a digit short and is refused. Quoting does not
+help — the coercion happens before the quotes matter.
+
+### Tests read source, not the build
+
+`vitest.config.ts` aliases `@dianemo/core` and `@dianemo/backend-redis` to their `src/index.ts`,
+matching the `paths` the root `tsconfig.json` already gives tsc. Both resolvers therefore agree,
+and `npm test` runs on a fresh clone before anything has been built.
+
+The alias is load-bearing rather than a convenience. The Redis backend's `ops/` layer imports
 `normalizeTtlSeconds`, `parseStoredNumber`, `calculateQueueScore` and
-`REQUEST_TOMBSTONE_TTL_SECONDS` from there, so under vitest it reads **compiled** core while the
-memory backend reads the source you just edited. Two things follow:
+`REQUEST_TOMBSTONE_TTL_SECONDS` from `@dianemo/core` by name. Without it those resolve through the
+`node_modules/@dianemo/core` symlink onto `packages/core/dist`, which a fresh clone has not built —
+so every suite fails to collect — and a *stale* `dist` is worse, because the Redis half of a run
+then reads compiled core while the memory half reads the source you just edited. The two disagree
+and it reads as a parity bug in the backend you did not touch.
 
-- **Change a shared core value and the Redis half of a run means nothing until you
-  `npm run build`.** The memory half already reflects the edit, so the two disagree and it reads
-  as a parity bug in the backend you did not touch.
-- **Do not build while a suite is running.** `npm run build` runs `rm -rf dist` first, and pulling
-  `dist` out from under a live run fails it in ways unrelated to the change.
+`npm run build` is still required before packing or publishing, since `main` and `exports` name
+`dist`. It is not required to run the tests.
