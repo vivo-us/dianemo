@@ -36,13 +36,24 @@ same name and would meter against one bucket, so that is a configuration error
 rather than a last-one-wins merge — as is any other duplicate name, and an empty
 list.
 
-> **Upgrading from 1.x:** budgets moved. They used to live at the un-suffixed
-> `<client namespace>:rateLimit`, and those keys are orphaned by the change. A
-> bucket that does not exist reads as **full**, so the first requests after the
-> upgrade meet a fresh budget and can burst up to `maxTokens` before the new key
-> starts metering. Deploy it where a single interval of extra headroom is
-> acceptable, or clear the old keys and let the new ones start at their ceiling
-> deliberately.
+> **Upgrading from 1.x — do not roll this out incrementally.** Budgets moved.
+> They used to live at the un-suffixed `<client namespace>:rateLimit`; they now
+> carry the limit's name. Two consequences, and the second is the serious one.
+>
+> The old keys are orphaned, and a bucket that does not exist reads as **full**,
+> so the first requests after the upgrade meet a fresh budget and can burst up to
+> `maxTokens` before the new key starts metering.
+>
+> Worse, a **rolling deploy runs both key layouts at once**. Old replicas meter
+> `<client>:rateLimit` while new ones meter `<client>:rateLimit:default`, and
+> neither sees the other's balance. The queue path survives it — one controller
+> per client drains the queue, whichever version it is on — but the uncontended
+> fast path runs on every replica independently, so for the length of the
+> rollout the fleet can send up to **twice** the agreed rate at the vendor.
+>
+> Stop the fleet, then start it on the new version. If you cannot, do the
+> rollout inside a window where a doubled rate is acceptable, and expect the
+> one-time burst above on top.
 
 ## What may go in the list
 
