@@ -62,9 +62,12 @@ export type RateLimitChange<
   R extends RateLimitData = RateLimitData,
   N extends RateLimitData = R,
 > = (
-  oldRateLimit: R,
+  oldRateLimit: (R & { name: string })[],
   response: AxiosResponse
-) => Promise<N | undefined> | N | undefined;
+) =>
+  | Promise<DeclaredRateLimit<N>[] | undefined>
+  | DeclaredRateLimit<N>[]
+  | undefined;
 
 export interface ClientConstructorData {
   client: CreateClientData;
@@ -99,8 +102,15 @@ export interface CreateClientData<R extends RateLimitData = RateLimitData> {
    * Not for callers to set — `generateClients` derives it.
    */
   authOwnerName?: string;
-  /** The Rate Limit info for the Client. Defaults to `noLimit`. */
-  rateLimit?: R;
+  /**
+   * Every limit this client is metered against. Defaults to `noLimit`.
+   *
+   * Always a list, even for one limit: a request is sent only when **all** of
+   * them admit it, so a per-second and a per-day cap live side by side here.
+   * `name` keys each limit's budget and may be omitted once per client, where it
+   * is `"default"`. See docs/rate-limits/multiple-limits.md.
+   */
+  rateLimit?: DeclaredRateLimit<R>[];
   /**
    * Computes a dynamic budget update. Shared clients receive their shared-limit
    * descriptor but update the concrete budget owned by their parent.
@@ -134,7 +144,12 @@ export interface CreateClientData<R extends RateLimitData = RateLimitData> {
 
 export interface RateLimitUpdatedData {
   clientName: string;
-  rateLimit: RateLimitData;
+  /**
+   * Published with every name resolved. Typed as the declared shape because a
+   * receiver also has to accept what an operator sends, and every
+   * `handleRateLimitUpdated` resolves names again on receipt.
+   */
+  rateLimit: DeclaredRateLimit[];
   /**
    * `init` at construction, `operator` for an admin update, `dynamic` from a
    * `rateLimitChange` callback. A listener that persists changes filters on this.
@@ -154,6 +169,27 @@ export type RateLimitData =
   | ConcurrencyLimitClientOptions
   | NoLimitClientOptions
   | SharedLimitClientOptions;
+
+/**
+ * One limit as a caller writes it.
+ *
+ * `name` keys the limit's budget — `<client namespace>:rateLimit:<name>` — and is
+ * what makes reordering the list safe. It may be omitted, where it is
+ * `"default"`, so a client with one limit never has to invent one; a second
+ * unnamed limit is refused, since both would meter against one bucket.
+ */
+export type DeclaredRateLimit<R extends RateLimitData = RateLimitData> = R & {
+  name?: string;
+};
+
+/**
+ * One limit once its name has been resolved. This is the shape everything past
+ * `createClient` works in — there is no second shape to branch on.
+ *
+ * Names must match `/^[a-z0-9_]{1,64}$/` and be unique within the client,
+ * because they become backend key segments.
+ */
+export type NamedRateLimitData = RateLimitData & { name: string };
 
 export interface NoLimitClientOptions {
   type: "noLimit";
@@ -181,11 +217,15 @@ export interface SharedLimitClientOptions {
   clientName: string;
 }
 
+/** What one declared limit reports, before its name is attached. */
 export type RateLimitStats =
   | RequestLimitClientStats
   | ConcurrencyLimitClientOptions
   | NoLimitClientOptions
   | SharedLimitClientOptions;
+
+/** How `getClientStats` reports a limit: one entry per declared limit. */
+export type NamedRateLimitStats = RateLimitStats & { name: string };
 
 export interface RequestLimitClientStats extends RequestLimitClientOptions {
   tokens: number;
@@ -277,7 +317,7 @@ export interface ClientStatistics {
   isFrozen: boolean;
   isThawing: boolean;
   thawRequestCount: number;
-  rateLimit: RateLimitStats;
+  rateLimit: NamedRateLimitStats[];
   requestsInQueue: ClientRequestsStatistics;
   requestsInProgress: ClientRequestsStatistics;
 }

@@ -81,7 +81,7 @@ describe.each(harnesses)("handler end to end — $name", (harness) => {
   });
 
   const withHandler = async (
-    rateLimit: Record<string, unknown>,
+    rateLimit: Record<string, unknown>[],
     fn: (
       handler: RequestHandler,
       clientName: string,
@@ -120,10 +120,10 @@ describe.each(harnesses)("handler end to end — $name", (harness) => {
 
   const QUEUE = "e2e:requestHandler:t:_:a:queue";
   const META = "e2e:requestHandler:t:_:a:request";
-  const CONCURRENCY = "e2e:requestHandler:t:_:a:concurrency";
+  const CONCURRENCY = "e2e:requestHandler:t:_:a:concurrency:default";
 
   it("serves an unlimited client without touching the queue", async () => {
-    await withHandler({ type: "noLimit" }, async (handler, name, backend) => {
+    await withHandler([{ type: "noLimit" }], async (handler, name, backend) => {
       const results = await Promise.all(
         Array.from({ length: 25 }, () => fire(handler, name))
       );
@@ -139,7 +139,7 @@ describe.each(harnesses)("handler end to end — $name", (harness) => {
     // Ten tokens, forty requests: the first few take the fast path, the rest
     // must queue and still complete.
     await withHandler(
-      { type: "requestLimit", interval: 300, tokensToAdd: 10, maxTokens: 10 },
+      [{ type: "requestLimit", interval: 300, tokensToAdd: 10, maxTokens: 10 }],
       async (handler, name) => {
         const results = await Promise.all(
           Array.from({ length: 40 }, () => fire(handler, name))
@@ -154,7 +154,7 @@ describe.each(harnesses)("handler end to end — $name", (harness) => {
     // The limit is the whole contract: more in flight than configured is a
     // breach, and the limiter is worthless if it cannot also drain promptly.
     await withHandler(
-      { type: "concurrencyLimit", maxConcurrency: 5 },
+      [{ type: "concurrencyLimit", maxConcurrency: 5 }],
       async (handler, name, backend) => {
         let peak = 0;
         const watch = setInterval(() => {
@@ -181,7 +181,7 @@ describe.each(harnesses)("handler end to end — $name", (harness) => {
 
   it("releases every concurrency slot once the work is done", async () => {
     await withHandler(
-      { type: "concurrencyLimit", maxConcurrency: 4 },
+      [{ type: "concurrencyLimit", maxConcurrency: 4 }],
       async (handler, name, backend) => {
         await Promise.all(
           Array.from({ length: 40 }, () => fire(handler, name))

@@ -105,9 +105,6 @@ async function processRequests(this: BaseClient) {
             `Client ${this.name} | request ${requestId} has a cost the client can never satisfy; failing it and moving on`
           );
           skippedRequestIds.add(requestId);
-          // A concurrency client decides admission here rather than in
-          // `tryAcquireTurn`, so it never reaches the throwing path and has to
-          // report the impossible cost itself.
           await failUnsatisfiable.bind(this)(requestMetadata);
           continue;
         }
@@ -136,38 +133,6 @@ async function processRequests(this: BaseClient) {
         break;
       }
 
-      // The request may have finished between `getNextRequest` selecting it and the
-      // claim completing. Admission excludes a request's own id from the occupancy
-      // sum so a resubmit does not compete with itself, which means a claim for an
-      // id that has just released succeeds and re-creates its entry — and nothing
-      // is left to release it, so the capacity sits claimed until its TTL.
-      if (this.claimsOnAdmission()) {
-        // Narrows the window rather than closing it. A completion landing between
-        // this read and the notification below still strands the claim until the
-        // slot TTL; closing that would need the claim and the confirmation in one
-        // atomic operation, which is impossible while the claim and the queue entry
-        // are separate keys written by different callers.
-        //
-        // A read that failed is not evidence the request is gone, and this call sits
-        // outside the try below, so an escaping rejection would abandon the pass with
-        // the entry `inProgress` and its capacity claimed. Treating an unreadable
-        // entry as still queued keeps the claim, which is the recoverable error.
-        const stillQueued = await this.getRequestFromQueue(requestId).catch(
-          (error: unknown) => {
-            this.logger.warn(
-              { error },
-              `Client ${this.name} | could not confirm request ${requestId} is still queued; keeping its claim and continuing`
-            );
-            return "unreadable" as const;
-          }
-        );
-        // Only a definite absence releases.
-        if (stillQueued === null) {
-          await this.releaseAdmission(requestMetadata);
-          continue;
-        }
-      }
-
       // Applies with or without a grant. Grants are opt-in, so gating this on
       // `grantId` would let the default client release its entire queue the
       // instant a freeze expired, instead of probing with exactly one request.
@@ -175,10 +140,6 @@ async function processRequests(this: BaseClient) {
         const thawResult = await this.tryStartThawRequest(grantId, requestId);
 
         if (thawResult === "exists") {
-          // `canProcessNextRequest` already claimed this request's slot and the
-          // request is going back in the queue, so without the release a concurrency
-          // client thawing behind an in-flight probe sheds a slot on every pass.
-          await this.releaseAdmission(requestMetadata);
           await this.updateRequestInQueue(requestId, { status: "pending" });
           // No `scheduleDrainForFreeze` here, unlike the three decline exits above:
           // this request is not waiting for the freeze to lapse but for a probe that
@@ -196,7 +157,6 @@ async function processRequests(this: BaseClient) {
       try {
         const turn = await this.tryAcquireTurn(requestMetadata);
         if (!turn.acquired) {
-          await this.releaseAdmission(requestMetadata);
           await this.updateRequestInQueue(requestId, { status: "pending" });
           // Coming back later is the whole point: sleeping here would hold the
           // lock and stall every other grant and every cheaper or
@@ -216,6 +176,38 @@ async function processRequests(this: BaseClient) {
           break;
         }
 
+        // The request may have completed between the claim above and here.
+        // Admission excludes a request's own id from the occupancy sum so a
+        // resubmit does not compete with itself, which means a claim for an id
+        // that has just released succeeds and re-creates its entry — and nothing
+        // is left to release it, so the capacity sits claimed until its TTL.
+        //
+        // Narrows the window rather than closing it: a completion landing between
+        // this read and the notification below still strands the claim. Closing
+        // that would need the claim and the confirmation in one atomic operation,
+        // which is impossible while the claim and the queue entry are separate
+        // keys written by different callers.
+        //
+        // A read that failed is not evidence the request is gone, so an
+        // unreadable entry is treated as still queued: keeping the claim is the
+        // recoverable error.
+        if (this.claimsReleasableCapacity()) {
+          const stillQueued = await this.getRequestFromQueue(requestId).catch(
+            (error: unknown) => {
+              this.logger.warn(
+                { error },
+                `Client ${this.name} | could not confirm request ${requestId} is still queued; keeping its claim and continuing`
+              );
+              return "unreadable" as const;
+            }
+          );
+          // Only a definite absence hands the claim back.
+          if (stillQueued === null) {
+            await this.releaseUnusedAdmission(requestMetadata);
+            continue;
+          }
+        }
+
         // Addressed to the replica waiting on this request rather than broadcast,
         // since only the owner has a listener for it. When that owner is this
         // replica the hand-over stays in process.
@@ -228,7 +220,6 @@ async function processRequests(this: BaseClient) {
           );
         }
       } catch (error) {
-        await this.releaseAdmission(requestMetadata).catch(() => {});
         await this.updateRequestInQueue(requestId, {
           status: "pending",
         }).catch(() => {});

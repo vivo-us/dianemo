@@ -33,6 +33,42 @@ export interface AcquireConcurrencyResult {
   error?: string;
 }
 
+/**
+ * One budget a request must claim, named by the key it lives under.
+ *
+ * A client with several limits presents the whole list to the backend at once,
+ * because claiming them one at a time is not the same operation: a peer can
+ * take the second budget between two calls, leaving the first spent on a
+ * request that is then declined. See docs/rate-limits/multiple-limits.md.
+ */
+export type MultiLimitSpec = {
+  /**
+   * The freeze governing this budget, which is not always the spender's own: a
+   * `sharedLimit` entry draws on another client's balance, and that client's
+   * freeze is what says the balance may not be spent.
+   */
+  freezeKey?: string;
+} & (
+  | { kind: "tokenBucket"; key: string; config: TokenBucketConfig }
+  | {
+      kind: "concurrency";
+      key: string;
+      config: ConcurrencyConfig;
+      /** Member id the slot is recorded under; released by the same id. */
+      slotId: string;
+    }
+);
+
+export interface AcquireMultiLimitResult {
+  acquired: boolean;
+  /** ms to wait before retrying — the longest any declining budget asked for. */
+  waitTime?: number;
+  /** Set when one of the configurations is unusable, as opposed to merely full. */
+  error?: string;
+  /** Key of the budget that declined, for logs. Unset when every one admitted. */
+  blockedBy?: string;
+}
+
 export interface QueuedRequest {
   requestId: string;
   clientName: string;
@@ -204,6 +240,40 @@ export interface DianemoBackend {
     maxTokens: number,
     freezeKey?: string
   ): Promise<void>;
+
+  // ------------------------------------------------------------ several budgets
+
+  /**
+   * Claims every listed budget, or none of them.
+   *
+   * Optional so a backend written against an earlier version still satisfies the
+   * interface; a client declaring several limits refuses to start without it,
+   * rather than silently metering against one budget. All-or-nothing is the whole
+   * contract: a partial claim leaks budget that no completion path hands back.
+   */
+  acquireMultiLimit?(
+    specs: MultiLimitSpec[],
+    cost: number
+  ): Promise<AcquireMultiLimitResult>;
+  /**
+   * Hands back what `acquireMultiLimit` claimed. Token buckets are credited and
+   * concurrency slots released, so it is also the completion path for the slots.
+   *
+   * A spec's own `freezeKey` suppresses its refund while that freeze stands,
+   * matching {@link refundTokens} — a freeze empties buckets on purpose.
+   */
+  releaseMultiLimit?(specs: MultiLimitSpec[], cost: number): Promise<void>;
+  /**
+   * The no-queue fast path for several budgets: admit only if nothing is queued,
+   * none of `freezeKeys` stands, and every budget can be claimed at once.
+   */
+  tryAdmitMultiLimit?(
+    queueKey: string,
+    freezeKeys: string[],
+    specs: MultiLimitSpec[],
+    cost: number,
+    ttl?: number
+  ): Promise<boolean>;
 
   // ------------------------------------------------------------- concurrency
 

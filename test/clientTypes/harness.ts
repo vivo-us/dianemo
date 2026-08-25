@@ -165,7 +165,7 @@ export interface Harness {
  *    1  lifecycle.integration (direct)
  *    2  backendParity
  *    3  backendFailure (direct too) · coreRecovery (direct)
- *    4  noLimit.test
+ *    4  noLimit.test · multiLimit
  *    5  requestLimit.test · redisOps (direct)
  *    6  concurrencyLimit.test · luaGuards (direct)
  *    7  auditFixes · sharedLimit.test
@@ -269,7 +269,10 @@ export async function startUpstream(delayMs = 0) {
 
 export interface ClientSpec {
   name: string;
-  rateLimit: Record<string, unknown>;
+  /** Always a list, as the public API takes it — one limit or several. */
+  rateLimit: Record<string, unknown>[];
+  /** For a suite asserting what one attempt did, rather than what four did. */
+  retryOptions?: Record<string, unknown>;
 }
 
 /**
@@ -294,6 +297,7 @@ export async function withHandler(
           name: `${spec.name}:_:${creds.instanceId}`,
           rateLimit: spec.rateLimit,
           requestOptions: { defaults: { baseURL } },
+          ...(spec.retryOptions ? { retryOptions: spec.retryOptions } : {}),
         },
       ]) as never
     );
@@ -388,7 +392,7 @@ export async function withReplicas(
     );
   }
   const shared = options.clients.find(
-    (c) => c.rateLimit.type === "sharedLimit"
+    (c) => c.rateLimit.length === 1 && c.rateLimit[0].type === "sharedLimit"
   );
   if (shared) {
     throw new Error(

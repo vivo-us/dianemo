@@ -1,9 +1,20 @@
-import type { CreateClientData, RateLimitData } from "../client/types.js";
+import type { CreateClientData, DeclaredRateLimit } from "../client/types.js";
 import { collectClientNames, generateClients } from "./createClients.js";
-import type { RateLimitOverrides } from "../types.js";
 import { encrypt, decrypt } from "./encryption.js";
 import { ConfigurationError } from "../errors.js";
 import type RequestHandler from "../index.js";
+import {
+  assertUsableRateLimits,
+  isSharedLimitOnly,
+  normalizeRateLimit,
+} from "./rateLimit.js";
+import type {
+  ClientTemplateContext,
+  ClientTemplateOptions,
+  RateLimitOverrides,
+  RateLimitPlan,
+  TemplateClientOptions,
+} from "../types.js";
 
 /**
  * Serializes concurrent rebuilds of one `(templateName, instanceId)`. A local writer
@@ -59,12 +70,12 @@ export async function loadTemplateClientsFromBackend(
       continue;
     }
 
-    const overrides = await readOverrides.bind(this)(entry);
+    const settings = await readTemplateClientOptions.bind(this)(entry);
     await buildAndRegisterTemplateClients.bind(this)(
       templateName,
       instanceId,
       credentials,
-      overrides
+      settings
     );
   }
 
@@ -79,22 +90,101 @@ export async function loadTemplateClientsFromBackend(
 }
 
 /**
- * Sister to the encrypted credentials key — overrides aren't sensitive so
- * we store them as plain JSON. Missing key (or unparseable JSON) means
- * "no overrides", template defaults apply.
+ * Sister to the encrypted credentials key — these aren't sensitive, so they are
+ * stored as plain JSON and a replica that cannot decrypt the credentials can
+ * still read them. Missing key, or unparseable JSON, means template defaults.
  */
-async function readOverrides(
+export async function readTemplateClientOptions(
   this: RequestHandler,
   entry: string
-): Promise<RateLimitOverrides | undefined> {
+): Promise<TemplateClientOptions | undefined> {
   const raw = await this.backend.get(`${this.namespace}:overrides:${entry}`);
   if (!raw) return undefined;
   try {
-    return JSON.parse(raw) as RateLimitOverrides;
+    return decodeTemplateClientOptions(JSON.parse(raw));
   } catch {
-    this.logger.warn(`Malformed overrides JSON for ${entry}; ignoring`);
+    this.logger.warn(`Malformed template options JSON for ${entry}; ignoring`);
     return undefined;
   }
+}
+
+/**
+ * Reads back what this key holds, in either of the two shapes it has had.
+ *
+ * Before rate-limit options existed the value was the overrides record itself,
+ * and those entries are still in every backend that predates this — so an object
+ * naming neither of the current fields is read as that record rather than as an
+ * empty settings object, which would silently drop an operator's overrides on
+ * the first restart after an upgrade.
+ */
+function decodeTemplateClientOptions(parsed: unknown): TemplateClientOptions {
+  if (!parsed || typeof parsed !== "object") return {};
+  const value = parsed as Record<string, unknown>;
+  if ("rateLimitOption" in value || "rateLimitOverrides" in value) {
+    return value as TemplateClientOptions;
+  }
+  return { rateLimitOverrides: value as RateLimitOverrides };
+}
+
+/**
+ * Accepts either shape at the call site too, so the argument that used to be a
+ * bare overrides record still is one.
+ */
+export function normalizeTemplateClientOptions(
+  options?: TemplateClientOptions | RateLimitOverrides
+): TemplateClientOptions {
+  if (!options) return {};
+  return decodeTemplateClientOptions(options);
+}
+
+/** The JSON to store, or `undefined` when there is nothing worth a key. */
+export function serializeTemplateClientOptions(
+  settings: TemplateClientOptions
+): string | undefined {
+  const overrides = settings.rateLimitOverrides;
+  const hasOverrides = !!overrides && Object.keys(overrides).length > 0;
+  if (!hasOverrides && settings.rateLimitOption === undefined) return undefined;
+  return JSON.stringify({
+    ...(settings.rateLimitOption === undefined
+      ? {}
+      : { rateLimitOption: settings.rateLimitOption }),
+    ...(hasOverrides ? { rateLimitOverrides: overrides } : {}),
+  });
+}
+
+/**
+ * Rejects a template whose declared options could not be built from.
+ *
+ * At registration, because these are the plugin author's own constants: a plan
+ * with an unusable budget should fail the deploy that introduced it, not the
+ * first tenant who picks it.
+ */
+export function assertTemplateOptions(
+  templateName: string,
+  options: ClientTemplateOptions
+): void {
+  const declared = options.rateLimitOptions;
+  if (declared) {
+    for (const [key, plan] of Object.entries(declared)) {
+      for (const [path, rateLimit] of Object.entries(planPaths(plan))) {
+        // Names resolved first, as `createClient` will: a plan whose two limits
+        // both take the default is a duplicate, and the deploy should say so.
+        assertUsableRateLimits(
+          normalizeRateLimit(rateLimit),
+          `${templateName} (option "${key}"${path === "" ? "" : `, path "${path}"`})`
+        );
+      }
+    }
+  }
+  const fallback = options.defaultRateLimitOption;
+  if (fallback === undefined) return;
+  if (declared && fallback in declared) return;
+  throw new ConfigurationError(
+    "unknown_rate_limit_option",
+    `Template "${templateName}" names "${fallback}" as its defaultRateLimitOption, which is not one of its rateLimitOptions${
+      declared ? `: ${Object.keys(declared).join(", ")}` : " (it declares none)"
+    }.`
+  );
 }
 
 /**
@@ -106,7 +196,7 @@ export async function buildAndRegisterTemplateClients(
   templateName: string,
   instanceId: string,
   credentials: unknown,
-  overrides?: RateLimitOverrides
+  settings?: TemplateClientOptions
 ): Promise<void> {
   const lockKey = `${templateName}::${instanceId}`;
   const existing = buildLocks.get(lockKey);
@@ -123,7 +213,7 @@ export async function buildAndRegisterTemplateClients(
       templateName,
       instanceId,
       credentials,
-      overrides
+      settings
     );
   })();
   buildLocks.set(lockKey, run);
@@ -140,22 +230,36 @@ async function doBuildAndRegister(
   templateName: string,
   instanceId: string,
   credentials: unknown,
-  overrides?: RateLimitOverrides
+  settings?: TemplateClientOptions
 ): Promise<void> {
-  const builder = this.templates.get(templateName);
-  if (!builder) {
+  const template = this.templates.get(templateName);
+  if (!template) {
     this.logger.warn(
       `No builder registered for template "${templateName}", skipping`
     );
     return;
   }
 
-  const result = builder(credentials);
+  const context = resolveTemplateContext.bind(this)(
+    templateName,
+    template.options,
+    settings
+  );
+  const result = template.builder(credentials, context);
   const clientDataList: CreateClientData[] = Array.isArray(result)
     ? result
     : [result];
 
-  // type mismatch skips the override — changing type would switch the underlying client class.
+  // The plan first, then the overrides on top: the plan is what the template
+  // says this tenant is entitled to, and an override is the operator overruling
+  // it. The other order would let a plan quietly undo an operator's decision.
+  if (context.rateLimits) {
+    applyPlan.bind(this)(templateName, clientDataList, context.rateLimits);
+  }
+
+  const overrides = settings?.rateLimitOverrides;
+  // A shape mismatch skips the override — changing shape would switch the
+  // underlying client class.
   if (overrides && Object.keys(overrides).length > 0) {
     for (const root of clientDataList) {
       applyOverrides.bind(this)(root, overrides, "");
@@ -215,6 +319,85 @@ async function doBuildAndRegister(
   await generateClients.bind(this)(clientDataList);
 }
 
+/**
+ * Resolves the plan a template client is on into what its builder is handed.
+ *
+ * An option this template no longer declares is dropped rather than refused: the
+ * key was written when it was valid, and a plugin that renames a plan should not
+ * make every client already on it unbuildable on the next restart. The warning
+ * is what says the client is now on the template default.
+ */
+function resolveTemplateContext(
+  this: RequestHandler,
+  templateName: string,
+  options: ClientTemplateOptions,
+  settings?: TemplateClientOptions
+): ClientTemplateContext {
+  const chosen = settings?.rateLimitOption ?? options.defaultRateLimitOption;
+  if (chosen === undefined) return {};
+  const plan = options.rateLimitOptions?.[chosen];
+  if (plan === undefined) {
+    this.logger.warn(
+      `Template "${templateName}" no longer declares a rateLimitOption "${chosen}"; building on the template default instead`
+    );
+    return {};
+  }
+  const rateLimits = planPaths(plan);
+  return { rateLimit: rateLimits[""], rateLimits, rateLimitOption: chosen };
+}
+
+/**
+ * A plan as the path map everything downstream works in.
+ *
+ * A plan is either the root client's limits or a limit list per sub-client path,
+ * and since a limit list is always an array, `Array.isArray` tells them apart
+ * outright — no inspecting the value to guess which it is.
+ */
+export function planPaths(
+  plan: RateLimitPlan
+): Record<string, DeclaredRateLimit[]> {
+  return Array.isArray(plan) ? { "": plan } : plan;
+}
+
+/**
+ * Places a chosen plan's limits onto the clients the builder produced.
+ *
+ * Unlike an override, a plan is not held to the shape the builder declared: both
+ * are the template author's own, the plan was validated at registration, and a
+ * plan silently skipped for disagreeing with a default it is meant to replace
+ * would be far harder to explain than one that simply applies.
+ *
+ * A path matching no client is a plugin bug — a renamed sub-client, most likely —
+ * so it is reported rather than dropped, since the symptom otherwise is one
+ * endpoint quietly running unlimited.
+ */
+function applyPlan(
+  this: RequestHandler,
+  templateName: string,
+  clients: CreateClientData[],
+  rateLimits: Record<string, DeclaredRateLimit[]>
+): void {
+  const applied = new Set<string>();
+  const walk = (client: CreateClientData, path: string): void => {
+    const limit = rateLimits[path];
+    if (limit !== undefined) {
+      client.rateLimit = limit;
+      applied.add(path);
+    }
+    for (const sub of client.subClients ?? []) {
+      walk(sub, path === "" ? sub.name : `${path}:${sub.name}`);
+    }
+  };
+  for (const root of clients) walk(root, "");
+
+  for (const path of Object.keys(rateLimits)) {
+    if (applied.has(path)) continue;
+    this.logger.warn(
+      `Template "${templateName}" has a rate-limit option covering path "${path}", which no client it built matches; that limit was not applied`
+    );
+  }
+}
+
 function applyOverrides(
   this: RequestHandler,
   client: CreateClientData,
@@ -223,10 +406,13 @@ function applyOverrides(
 ): void {
   const override = overrides[path];
   if (override !== undefined) {
-    const existing: RateLimitData = client.rateLimit ?? { type: "noLimit" };
-    if (override.type !== existing.type) {
+    const existing: DeclaredRateLimit[] = client.rateLimit ?? [
+      { type: "noLimit" },
+    ];
+    const mismatch = describeShapeMismatch(existing, override);
+    if (mismatch) {
       this.logger.warn(
-        `Rate-limit override for path "${path}" has type "${override.type}" but template default is "${existing.type}" — skipping override`
+        `Rate-limit override for path "${path}" ${mismatch} — skipping override`
       );
     } else {
       client.rateLimit = override;
@@ -238,6 +424,26 @@ function applyOverrides(
       applyOverrides.bind(this)(sub, overrides, subPath);
     }
   }
+}
+
+/**
+ * Why an override may not replace a template default, or `undefined` when it may.
+ *
+ * An override retunes budgets the template declared; it does not change what
+ * kind of client is built. Only one distinction still does that: a client that
+ * borrows another's budget owns no queue, so swapping a `sharedLimit` for
+ * budgets of its own — or the reverse — is a different client, not a different
+ * limit. Everything else an override may freely change.
+ */
+function describeShapeMismatch(
+  existing: readonly DeclaredRateLimit[],
+  override: readonly DeclaredRateLimit[]
+): string | undefined {
+  const existingIsShared = isSharedLimitOnly(existing);
+  if (existingIsShared === isSharedLimitOnly(override)) return undefined;
+  return existingIsShared
+    ? "declares budgets of its own where the template default shares another client's"
+    : "shares another client's budget where the template default declares its own";
 }
 
 export async function destroyTemplateClients(

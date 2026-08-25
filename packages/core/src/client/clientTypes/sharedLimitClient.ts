@@ -1,32 +1,44 @@
 import type { RequestDoneData } from "../../request/types.js";
 import { ClientUnavailableError } from "../../errors.js";
 import BaseClient from "../index.js";
+import {
+  normalizeRateLimit,
+  shortestRefillInterval,
+} from "../../utils/rateLimit.js";
 import type {
   ClientConstructorData,
-  SharedLimitClientOptions,
-  RateLimitStats,
+  NamedRateLimitData,
+  NamedRateLimitStats,
   RateLimitUpdatedData,
+  SharedLimitClientOptions,
 } from "../types.js";
 
 /**
  * Draws on another client's budget. See docs/rate-limits/shared-limit.md.
  */
 class SharedLimitClient extends BaseClient {
-  protected rateLimit: SharedLimitClientOptions;
+  protected rateLimit: NamedRateLimitData[];
+  /** The one entry such a client may declare; see `assertUsableRateLimits`. */
+  private shared: SharedLimitClientOptions;
 
-  constructor(
-    data: ClientConstructorData,
-    rateLimit: SharedLimitClientOptions
-  ) {
+  constructor(data: ClientConstructorData, rateLimit: NamedRateLimitData[]) {
+    const shared = rateLimit[0] as SharedLimitClientOptions;
     // Constructing with the parent's name is the entire mechanism: queue,
     // bucket, freeze state and channels all resolve to the parent's keys.
-    super(data, rateLimit.clientName);
+    super(data, shared.clientName);
     this.rateLimit = rateLimit;
+    this.shared = shared;
   }
 
   public handleRateLimitUpdated(data: RateLimitUpdatedData) {
-    if (data.rateLimit.type !== "sharedLimit") return;
-    this.rateLimit = data.rateLimit;
+    // Anything else would mean a different client class, which a broadcast
+    // cannot change; the rebuild path is what swaps one client for another.
+    if (!Array.isArray(data.rateLimit)) return;
+    const limits = normalizeRateLimit(data.rateLimit);
+    const shared = limits[0];
+    if (limits.length !== 1 || shared.type !== "sharedLimit") return;
+    this.rateLimit = limits;
+    this.shared = shared;
   }
 
   /**
@@ -38,13 +50,15 @@ class SharedLimitClient extends BaseClient {
     if (this.getParentRateLimit?.() === undefined) {
       throw new ClientUnavailableError(
         "shared_limit_parent_missing",
-        `Client "${this.sourceClientData.name}" shares the rate limit of "${this.rateLimit.clientName}", which is no longer registered. Nothing drains that budget's queue, so the request would wait out its admission timeout and fail.`
+        `Client "${this.sourceClientData.name}" shares the rate limit of "${this.shared.clientName}", which is no longer registered. Nothing drains that budget's queue, so the request would wait out its admission timeout and fail.`
       );
     }
   }
 
-  protected async getRateLimitStats(): Promise<RateLimitStats> {
-    return this.rateLimit;
+  protected async getRateLimitStats(): Promise<NamedRateLimitStats[]> {
+    // From the narrowed field, not `rateLimit`: the array's element type admits a
+    // `requestLimit`, which would owe a token balance this client cannot report.
+    return [{ ...this.shared, name: this.rateLimit[0].name }];
   }
 
   // Empty because completion, freezing and cleanup all belong to the parent, which
@@ -70,9 +84,10 @@ class SharedLimitClient extends BaseClient {
     // at all for a child with `retryBackoffBaseTime: 0`.
     const base = super.getFreezeBaseTime();
     const parent = this.getParentRateLimit?.();
-    return parent?.type === "requestLimit"
-      ? Math.max(parent.interval, base)
-      : base;
+    // The shortest of the owner's refill intervals when it declares several: the
+    // longest would floor every freeze at the owner's slowest quota.
+    const interval = parent ? shortestRefillInterval(parent) : undefined;
+    return interval === undefined ? base : Math.max(interval, base);
   }
 
   protected handleDestroy() {}

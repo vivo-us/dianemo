@@ -17,11 +17,15 @@ import {
   encryptCredentials,
   decryptCredentials,
   templateClientNamesKey,
+  assertTemplateOptions,
+  normalizeTemplateClientOptions,
+  serializeTemplateClientOptions,
+  readTemplateClientOptions,
 } from "./utils/templateClients.js";
 import type {
   CreateClientData,
+  NamedRateLimitData,
   ProbeRequestConfig,
-  RateLimitData,
   SetGrantTokensData,
 } from "./client/types.js";
 import {
@@ -36,12 +40,15 @@ import {
 } from "./plugin.js";
 import type {
   ClientTemplateBuilder,
+  ClientTemplateOptions,
   ClientTemplates,
   RateLimitOverrides,
+  RegisteredTemplate,
   RequestHandlerConstructorOptions,
   RequestHandlerMetadata,
   RequestHandlerStatus,
   StartupHook,
+  TemplateClientOptions,
 } from "./types.js";
 
 export type {
@@ -52,9 +59,13 @@ export type {
 } from "./client/types.js";
 export type {
   ClientTemplateBuilder,
+  ClientTemplateContext,
+  ClientTemplateOptions,
   ClientTemplates,
   StartupHook,
   RateLimitOverrides,
+  RateLimitPlan,
+  TemplateClientOptions,
 } from "./types.js";
 
 export {
@@ -101,6 +112,7 @@ export {
 } from "./backend/ttl.js";
 export type {
   AcquireConcurrencyResult,
+  AcquireMultiLimitResult,
   AcquireTokensResult,
   BatchOp,
   BatchOptions,
@@ -108,6 +120,7 @@ export type {
   DianemoBackend,
   FreezeState,
   MessageHandler,
+  MultiLimitSpec,
   QueueStats,
   QueuedRequest,
   TokenBucketConfig,
@@ -130,11 +143,15 @@ export type { RequestConfig, RequestMetadata } from "./request/types.js";
 export type {
   CreateClientData,
   RateLimitData,
+  DeclaredRateLimit,
+  NamedRateLimitData,
   ProbeRequestConfig,
   NoLimitClientOptions,
   RequestLimitClientOptions,
   ConcurrencyLimitClientOptions,
   SharedLimitClientOptions,
+  RateLimitStats,
+  NamedRateLimitStats,
 } from "./client/types.js";
 export type {
   RequestHandlerConstructorOptions,
@@ -155,7 +172,7 @@ export default class RequestHandler {
   protected key: string;
   protected clients: Map<string, BaseClient> = new Map();
   protected defaultClient: CreateClientData;
-  protected templates: Map<string, ClientTemplateBuilder<unknown>> = new Map();
+  protected templates: Map<string, RegisteredTemplate> = new Map();
   protected templateClientMap: Map<string, Map<string, Set<string>>> =
     new Map();
   protected localTemplateClients: Set<string> = new Set();
@@ -198,7 +215,7 @@ export default class RequestHandler {
     }requestHandler`;
     this.key = data.key;
     this.defaultClient = data.defaultClientOptions || {
-      rateLimit: { type: "noLimit" },
+      rateLimit: [{ type: "noLimit" }],
       name: "default",
     };
     this.logger = data.logger ?? noopLogger;
@@ -531,10 +548,23 @@ export default class RequestHandler {
     return Array.from(this.templates.keys());
   }
 
+  /**
+   * The rate-limit options a template lets callers choose between, for building a
+   * plan picker. Empty when the template declares none, which also means
+   * `addTemplateClient` will reject a `rateLimitOption` for it.
+   */
+  public getRateLimitOptions<K extends keyof ClientTemplates>(
+    templateName: K
+  ): string[] {
+    const declared = this.templates.get(templateName as string)?.options
+      .rateLimitOptions;
+    return declared ? Object.keys(declared) : [];
+  }
+
   /** Loaded clients with their effective rate limit — template default plus overrides. */
   public getLoadedClients(): Array<{
     name: string;
-    rateLimit: RateLimitData;
+    rateLimit: NamedRateLimitData[];
   }> {
     return Array.from(this.clients.values()).map((c) => ({
       name: c.getName(),
@@ -695,7 +725,8 @@ export default class RequestHandler {
    */
   public async registerClientTemplate<K extends keyof ClientTemplates>(
     name: K,
-    builder: ClientTemplateBuilder<ClientTemplates[K]>
+    builder: ClientTemplateBuilder<ClientTemplates[K]>,
+    options: ClientTemplateOptions = {}
   ): Promise<void> {
     // Template names occupy parts[0] of clientName, which is `:`-delimited
     // (`<template>:<orgId>:<alias>[:<sub>]`). A template containing `:`
@@ -707,10 +738,11 @@ export default class RequestHandler {
         `Template name "${String(name)}" must not contain ":"`
       );
     }
-    this.templates.set(
-      name as string,
-      builder as ClientTemplateBuilder<unknown>
-    );
+    assertTemplateOptions(name as string, options);
+    this.templates.set(name as string, {
+      builder: builder as ClientTemplateBuilder<unknown>,
+      options,
+    });
 
     if (this.status !== "started") return;
 
@@ -719,16 +751,12 @@ export default class RequestHandler {
     const myEntries = entries.filter((e) => e.startsWith(prefix));
 
     for (const entry of myEntries) {
-      const instanceId = entry.slice(prefix.length);
-      const encrypted = await this.backend.get(
-        `${this.namespace}:template:${entry}`
-      );
-      if (!encrypted) continue;
-      const credentials = decryptCredentials(encrypted, this.key);
-      await buildAndRegisterTemplateClients.bind(this)(
-        name,
-        instanceId,
-        credentials
+      // Through the rebuild path rather than reading the blob here, so a client
+      // built by a late registration gets the same stored plan and overrides one
+      // built at startup does.
+      await this.rebuildTemplateClient(
+        name as string,
+        entry.slice(prefix.length)
       );
     }
 
@@ -772,13 +800,16 @@ export default class RequestHandler {
    * restarts can rebuild it. Auto-starts the handler.
    *
    * For credentials one writer distributes to many readers; use
-   * {@link addLocalTemplateClient} for per-replica ones. `rateLimitOverrides` is
-   * documented on {@link RateLimitOverrides}.
+   * {@link addLocalTemplateClient} for per-replica ones.
+   *
+   * `options` carries this instance's `rateLimitOption` — one of the plans the
+   * template declared — and any operator `rateLimitOverrides`. A bare overrides
+   * record is still accepted in that position, as the argument used to be.
    */
   public async addTemplateClient<K extends keyof ClientTemplates>(
     templateName: K,
     credentials: ClientTemplates[K] & { instanceId: string },
-    rateLimitOverrides?: RateLimitOverrides
+    options?: TemplateClientOptions | RateLimitOverrides
   ): Promise<void> {
     // status === "starting" means we're inside doStart already (e.g., called from a startup
     // hook); the backend is initialized at that point, so it's safe to proceed without auto-starting
@@ -788,7 +819,7 @@ export default class RequestHandler {
     await this.doAddTemplateClient(
       templateName,
       credentials,
-      rateLimitOverrides
+      normalizeTemplateClientOptions(options)
     );
     await this.scheduleClientRoles();
   }
@@ -805,7 +836,7 @@ export default class RequestHandler {
   public async addLocalTemplateClient<K extends keyof ClientTemplates>(
     templateName: K,
     credentials: ClientTemplates[K] & { instanceId: string },
-    rateLimitOverrides?: RateLimitOverrides
+    options?: TemplateClientOptions | RateLimitOverrides
   ): Promise<void> {
     this.assertTemplateMutationAllowed();
     if (this.status === "stopped") await this.start();
@@ -815,21 +846,48 @@ export default class RequestHandler {
       );
       return;
     }
+    const settings = normalizeTemplateClientOptions(options);
+    this.assertRateLimitOptionAllowed(templateName, settings.rateLimitOption);
     const { instanceId } = credentials as { instanceId: string };
     this.localTemplateClients.add(`${templateName}::${instanceId}`);
     await buildAndRegisterTemplateClients.bind(this)(
       templateName,
       instanceId,
       credentials,
-      rateLimitOverrides
+      settings
     );
     await this.scheduleClientRoles();
+  }
+
+  /**
+   * Refuses a plan the template does not offer.
+   *
+   * At the boundary rather than at build time: a key stored now is read back by
+   * every replica and every restart, so accepting one the template never declared
+   * would put a client on the template default while its record says otherwise.
+   */
+  private assertRateLimitOptionAllowed(
+    templateName: string,
+    rateLimitOption: string | undefined
+  ): void {
+    if (rateLimitOption === undefined) return;
+    const declared = this.templates.get(templateName)?.options.rateLimitOptions;
+    const available = declared ? Object.keys(declared) : [];
+    if (available.includes(rateLimitOption)) return;
+    throw new ConfigurationError(
+      "unknown_rate_limit_option",
+      available.length === 0
+        ? `Template "${templateName}" declares no rateLimitOptions, so it accepts no rateLimitOption. A template chooses which limits callers may pick from; add them at registerClientTemplate.`
+        : `Template "${templateName}" has no rateLimitOption "${rateLimitOption}". It offers: ${available
+            .map((key) => `"${key}"`)
+            .join(", ")}.`
+    );
   }
 
   private async doAddTemplateClient(
     templateName: string,
     credentials: { instanceId: string },
-    rateLimitOverrides?: RateLimitOverrides
+    settings: TemplateClientOptions
   ): Promise<void> {
     if (!this.templates.has(templateName)) {
       this.logger.warn(
@@ -837,6 +895,8 @@ export default class RequestHandler {
       );
       return;
     }
+
+    this.assertRateLimitOptionAllowed(templateName, settings.rateLimitOption);
 
     const { instanceId } = credentials;
     // At the boundary, so a bad identifier is rejected by the call that
@@ -851,9 +911,10 @@ export default class RequestHandler {
     const encrypted = encryptCredentials(credentials, this.key);
 
     // MULTI/EXEC for atomicity — peers reading mid-write would otherwise
-    // see template (new) but overrides (stale-or-not-yet-deleted), and the
+    // see template (new) but settings (stale-or-not-yet-deleted), and the
     // subsequent broadcast would race ahead of the cleanup. The window is
     // small but the cost of MULTI vs pipeline is negligible.
+    const settingsJson = serializeTemplateClientOptions(settings);
     await this.backend.batch(
       [
         {
@@ -862,11 +923,11 @@ export default class RequestHandler {
           value: encrypted,
         },
         { op: "sadd", key: `${this.namespace}:templates`, member: entry },
-        rateLimitOverrides && Object.keys(rateLimitOverrides).length > 0
+        settingsJson
           ? {
               op: "set" as const,
               key: `${this.namespace}:overrides:${entry}`,
-              value: JSON.stringify(rateLimitOverrides),
+              value: settingsJson,
             }
           : { op: "del" as const, key: `${this.namespace}:overrides:${entry}` },
       ],
@@ -897,22 +958,12 @@ export default class RequestHandler {
     );
     if (!encrypted) return;
     const credentials = decryptCredentials(encrypted, this.key);
-    const overridesRaw = await this.backend.get(
-      `${this.namespace}:overrides:${entry}`
-    );
-    let overrides: RateLimitOverrides | undefined;
-    if (overridesRaw) {
-      try {
-        overrides = JSON.parse(overridesRaw) as RateLimitOverrides;
-      } catch {
-        this.logger.warn(`Malformed overrides JSON for ${entry}; ignoring`);
-      }
-    }
+    const settings = await readTemplateClientOptions.bind(this)(entry);
     await buildAndRegisterTemplateClients.bind(this)(
       templateName,
       instanceId,
       credentials,
-      overrides
+      settings
     );
   }
 

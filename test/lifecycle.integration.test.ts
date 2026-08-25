@@ -95,12 +95,14 @@ describeIfRedis("handler lifecycle against a real Redis", () => {
       await handler.registerClientTemplate("probe" as never, (creds) => [
         {
           name: `probe:_:${(creds as { instanceId: string }).instanceId}`,
-          rateLimit: {
-            type: "requestLimit",
-            interval: 1000,
-            tokensToAdd: 5,
-            maxTokens: 5,
-          },
+          rateLimit: [
+            {
+              type: "requestLimit",
+              interval: 1000,
+              tokensToAdd: 5,
+              maxTokens: 5,
+            },
+          ],
         },
       ]);
       await handler.start();
@@ -129,7 +131,7 @@ describeIfRedis("handler lifecycle against a real Redis", () => {
       await handler.registerClientTemplate("probe" as never, (creds) => [
         {
           name: `probe:_:${(creds as { instanceId: string }).instanceId}`,
-          rateLimit: { type: "noLimit" },
+          rateLimit: [{ type: "noLimit" }],
         },
       ]);
       await handler.start();

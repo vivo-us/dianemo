@@ -185,7 +185,7 @@ async function withNoLimit(
     ((creds: { instanceId: string }) => [
       {
         name: `nl:_:${creds.instanceId}`,
-        rateLimit: { type: "noLimit" },
+        rateLimit: [{ type: "noLimit" }],
         ...(options.retryOptions ? { retryOptions: options.retryOptions } : {}),
         ...(options.authentication
           ? { authentication: options.authentication }
@@ -1692,7 +1692,7 @@ describe.skipIf(!REDIS_URL)("noLimit scenarios — two processes", () => {
           ((creds: { instanceId: string }) => [
             {
               name: `nl:_:${creds.instanceId}`,
-              rateLimit: { type: "noLimit" },
+              rateLimit: [{ type: "noLimit" }],
               retryOptions: {
                 maxRetries: 0,
                 retryBackoffBaseTime: 2000,

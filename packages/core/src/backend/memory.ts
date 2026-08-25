@@ -12,12 +12,14 @@ import {
 } from "./queueScore.js";
 import type {
   AcquireConcurrencyResult,
+  AcquireMultiLimitResult,
   AcquireTokensResult,
   BatchOp,
   ConcurrencyConfig,
   DianemoBackend,
   FreezeState,
   MessageHandler,
+  MultiLimitSpec,
   QueueStats,
   QueuedRequest,
   TokenBucketConfig,
@@ -575,6 +577,184 @@ class MemoryBackend implements DianemoBackend {
     // separated by another spender's write.
     if (this.sorted(queueKey).length > 0) return false;
     return !this.freezeBlocksAdmission(freezeKey, Date.now());
+  }
+
+  // ------------------------------------------------------------ several budgets
+
+  /**
+   * Evaluates every budget before committing to any of them, so a request that
+   * cannot have all of them spends none. Twin of the Redis backend's
+   * `acquireMultiLimit` Lua.
+   *
+   * Every branch below runs without suspending, which is what makes the two
+   * phases one operation here — an `await` between the checks and the writes
+   * would let another spender land in between.
+   */
+  async acquireMultiLimit(
+    specs: MultiLimitSpec[],
+    cost: number
+  ): Promise<AcquireMultiLimitResult> {
+    const now = Date.now();
+    const planned = this.planMultiLimit(specs, cost, now);
+    if (planned.error) return { acquired: false, error: planned.error };
+    if (!planned.acquired) {
+      // Refill progress is persisted even on refusal, as the single-budget path
+      // does: the credit is real whether or not this request gets to spend it.
+      for (const bucket of planned.buckets) {
+        this.writeBucket(bucket.key, bucket.tokens, bucket.lastUpdate, 86400);
+      }
+      return {
+        acquired: false,
+        waitTime: planned.waitTime,
+        blockedBy: planned.blockedBy,
+      };
+    }
+    for (const bucket of planned.buckets) {
+      this.writeBucket(
+        bucket.key,
+        bucket.tokens - cost,
+        bucket.lastUpdate,
+        86400
+      );
+    }
+    for (const slot of planned.slots) {
+      this.claimSlot(slot.key, slot.slotId, cost, now, 86400);
+    }
+    return { acquired: true };
+  }
+
+  async releaseMultiLimit(
+    specs: MultiLimitSpec[],
+    cost: number
+  ): Promise<void> {
+    for (const spec of specs) {
+      if (spec.kind === "concurrency") {
+        await this.releaseConcurrency(spec.key, spec.slotId);
+        continue;
+      }
+      await this.refundTokens(
+        spec.key,
+        cost,
+        spec.config.maxTokens,
+        spec.freezeKey
+      );
+    }
+  }
+
+  async tryAdmitMultiLimit(
+    queueKey: string,
+    freezeKeys: string[],
+    specs: MultiLimitSpec[],
+    cost: number,
+    ttl = 86400
+  ): Promise<boolean> {
+    if (this.sorted(queueKey).length > 0) return false;
+    const now = Date.now();
+    for (const freezeKey of freezeKeys) {
+      if (this.freezeBlocksAdmission(freezeKey, now)) return false;
+    }
+
+    const planned = this.planMultiLimit(specs, cost, now);
+    if (planned.error || !planned.acquired) {
+      for (const bucket of planned.buckets) {
+        this.writeBucket(bucket.key, bucket.tokens, bucket.lastUpdate, ttl);
+      }
+      return false;
+    }
+    for (const bucket of planned.buckets) {
+      this.writeBucket(
+        bucket.key,
+        bucket.tokens - cost,
+        bucket.lastUpdate,
+        ttl
+      );
+    }
+    for (const slot of planned.slots) {
+      this.claimSlot(slot.key, slot.slotId, cost, now, ttl);
+    }
+    return true;
+  }
+
+  /**
+   * The check phase both multi-budget paths share: refills every bucket, reaps
+   * every slot ledger, and reports whether all of them could take `cost`.
+   *
+   * Returns the refilled balances rather than writing them, so the caller
+   * commits once it knows the whole set admitted. Reaping is a write and happens
+   * here regardless — an expired slot is expired whoever asked.
+   */
+  private planMultiLimit(
+    specs: MultiLimitSpec[],
+    cost: number,
+    now: number
+  ): {
+    acquired: boolean;
+    error?: string;
+    waitTime?: number;
+    blockedBy?: string;
+    buckets: { key: string; tokens: number; lastUpdate: number }[];
+    slots: { key: string; slotId: string }[];
+  } {
+    const buckets: { key: string; tokens: number; lastUpdate: number }[] = [];
+    const slots: { key: string; slotId: string }[] = [];
+    let acquired = true;
+    let waitTime: number | undefined;
+    let blockedBy: string | undefined;
+
+    for (const spec of specs) {
+      if (spec.kind === "tokenBucket") {
+        const error = unusableBudget(cost, spec.config);
+        if (error) return { acquired: false, error, buckets, slots };
+        const { tokens, lastUpdate } = this.refill(spec.key, spec.config, now);
+        buckets.push({ key: spec.key, tokens, lastUpdate });
+        if (tokens >= cost) continue;
+        const intervalsNeeded = Math.ceil(
+          (cost - tokens) / spec.config.tokensToAdd
+        );
+        const wait = Math.max(
+          0,
+          intervalsNeeded * spec.config.interval - (now - lastUpdate)
+        );
+        // The longest wait any budget asks for: coming back sooner only to be
+        // refused by this same budget is a wake-up that cannot succeed.
+        if (waitTime === undefined || wait > waitTime) {
+          waitTime = wait;
+          blockedBy = spec.key;
+        }
+        acquired = false;
+        continue;
+      }
+
+      if (!usableConcurrency(spec.config.maxConcurrency)) {
+        return {
+          acquired: false,
+          error: "maxConcurrency must be a finite number greater than 0",
+          buckets,
+          slots,
+        };
+      }
+      if (!usableCost(cost)) {
+        return {
+          acquired: false,
+          error: "cost must be a finite number that is not negative",
+          buckets,
+          slots,
+        };
+      }
+      this.reapConcurrency(spec.key, now - spec.config.requestTtl);
+      const currentCost = this.concurrencyCost(spec.key, spec.slotId);
+      if (currentCost + cost > spec.config.maxConcurrency) {
+        acquired = false;
+        // No deadline of its own: a slot is freed by a completion, and the
+        // caller decides what to fall back on. Recorded only if nothing with a
+        // real wait already claimed the slot.
+        if (blockedBy === undefined) blockedBy = spec.key;
+        continue;
+      }
+      slots.push({ key: spec.key, slotId: spec.slotId });
+    }
+
+    return { acquired, waitTime, blockedBy, buckets, slots };
   }
 
   // ------------------------------------------------------------- concurrency

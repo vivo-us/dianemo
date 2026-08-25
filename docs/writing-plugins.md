@@ -123,12 +123,14 @@ export async function registerAcmeTemplate(handler: RequestHandler) {
   await handler.registerClientTemplate("acme", (creds): CreateClientData[] => [
     {
       name: buildClientName("acme", creds),
-      rateLimit: {
-        type: "requestLimit",
-        interval: 1000,
-        tokensToAdd: 100,
-        maxTokens: 100,
-      },
+      rateLimit: [
+        {
+          type: "requestLimit",
+          interval: 1000,
+          tokensToAdd: 100,
+          maxTokens: 100,
+        },
+      ],
       requestOptions: { defaults: { baseURL: creds.baseUrl } },
       authentication: {
         type: "oauth2",
@@ -166,6 +168,120 @@ Three things worth noting:
 Pick the rate limit from what the vendor publishes — see
 [choosing a rate limit](rate-limits/README.md), and note that granularity
 matters more than most people expect.
+
+## Letting callers pick a plan
+
+Some vendors set the quota by subscription tier, so the template cannot know the
+right limit until it knows which plan a tenant is on. Declare the plans and let
+the caller name one:
+
+```ts
+await handler.registerClientTemplate(
+  "acme",
+  (creds): CreateClientData[] => [
+    {
+      name: buildClientName("acme", creds),
+      // …auth, baseURL, and everything else as before
+    },
+  ],
+  {
+    rateLimitOptions: {
+      free: FREE_TIER,
+      pro: [
+        { name: "per_second", type: "requestLimit", interval: 1000, tokensToAdd: 20, maxTokens: 20 },
+        { name: "per_day", type: "requestLimit", interval: 86_400_000, tokensToAdd: 50_000, maxTokens: 50_000 },
+      ],
+    },
+    defaultRateLimitOption: "free",
+  }
+);
+```
+
+The caller then names a key, and nothing else:
+
+```ts
+await handler.addTemplateClient("acme", credentials, {
+  rateLimitOption: "pro",
+});
+```
+
+What this does *not* let a caller do is supply a limit of their own. The options
+are the plugin author's constants, named by keys; a key the template does not
+declare is refused at `addTemplateClient`, and so is any key at all for a
+template that declares no options. That refusal is at the boundary rather than at
+build time on purpose — the key is stored beside the credentials, so one accepted
+now would be read back by every replica and every restart, leaving a client on
+the template default with its record saying otherwise.
+
+Three more things worth knowing:
+
+- **A plan may hold several limits.**
+  [A per-second and a per-day cap](rate-limits/multiple-limits.md) is exactly the
+  shape a paid tier tends to take.
+- **Plans are validated at registration.** A plan whose budget can never hand out
+  a token, or a `defaultRateLimitOption` naming a plan that is not declared,
+  fails the deploy that introduced it rather than the first tenant who picks it.
+- **Renaming a plan does not strand its tenants.** A stored key the template no
+  longer declares is dropped with a warning, and the client is built on the
+  template default.
+
+`handler.getRateLimitOptions("acme")` lists the keys, for a host rendering a
+picker.
+
+### A different limit per endpoint
+
+Vendors often publish a limit per endpoint rather than one for the account —
+Amazon's SP-API being the usual example — and a subscription tier then moves all
+of them at once. A plan can be keyed by sub-client path instead of being a single
+limit, using the same paths [overrides](concepts.md#rate-limit-overrides) use:
+`""` is the root client, `"orders"` its sub-client of that name, `"a:b"` a nested
+one.
+
+```ts
+await handler.registerClientTemplate(
+  "sp",
+  (creds): CreateClientData[] => [
+    {
+      name: buildClientName("sp", creds),
+      // The builder says which clients exist. It does not have to place a single
+      // limit — the chosen plan is applied to this tree by path.
+      subClients: [{ name: "orders" }, { name: "reports" }],
+    },
+  ],
+  {
+    rateLimitOptions: {
+      standard: {
+        "": [{ type: "requestLimit", interval: 1000, tokensToAdd: 1, maxTokens: 1 }],
+        orders: [{ type: "requestLimit", interval: 1000, tokensToAdd: 6, maxTokens: 6 }],
+        reports: [
+          { name: "per_second", type: "requestLimit", interval: 1000, tokensToAdd: 2, maxTokens: 2 },
+          { name: "per_day", type: "requestLimit", interval: 86_400_000, tokensToAdd: 500, maxTokens: 500 },
+        ],
+      },
+      premium: { /* the same paths, larger budgets */ },
+    },
+    defaultRateLimitOption: "standard",
+  }
+);
+```
+
+- **Every path of every plan is validated at registration**, which is the reason
+  to declare the tree here rather than keep it in a private constant the plugin
+  reads itself. A broken budget four endpoints deep fails the deploy.
+- **The plan applies before any operator override**, so an override still wins
+  for the one path it names and the plan holds everywhere else.
+- **A path matching no client is reported.** A renamed sub-client would otherwise
+  leave that endpoint running unlimited while the plan still claimed to cover it.
+- **The builder can still read the plan.** `ctx.rateLimits` is the whole resolved
+  map and `ctx.rateLimit` its `""` entry, for a builder that wants to decide
+  whether a sub-client should exist at all. `ctx.rateLimitOption` is there for
+  everything a tier changes that is *not* a rate limit — a different base URL for
+  enterprise, an endpoint an entry tier does not get.
+
+Operator-side [rate-limit overrides](concepts.md#rate-limit-overrides) are a
+separate mechanism and need no permission from the template. Plans are the
+sanctioned choice offered to a caller; overrides are the escape hatch for whoever
+runs the deployment.
 
 ## Request functions
 

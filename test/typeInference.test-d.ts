@@ -30,38 +30,42 @@ const fedex = definePlugin({
 it("correlates rateLimitChange with the configured client kind", () => {
   const client = {
     name: "limited",
-    rateLimit: {
-      type: "requestLimit",
-      interval: 1000,
-      tokensToAdd: 1,
-      maxTokens: 5,
-    },
-    rateLimitChange: (old: RequestLimitClientOptions) => ({
-      ...old,
-      maxTokens: old.maxTokens + 1,
-    }),
+    rateLimit: [
+      {
+        type: "requestLimit",
+        interval: 1000,
+        tokensToAdd: 1,
+        maxTokens: 5,
+      },
+    ],
+    rateLimitChange: (
+      old: (RequestLimitClientOptions & { name: string })[]
+    ) => [{ ...old[0], maxTokens: old[0].maxTokens + 1 }],
   } satisfies CreateClientData<RequestLimitClientOptions>;
-  expectTypeOf(client.rateLimitChange).parameter(0).toHaveProperty("maxTokens");
+  expectTypeOf(client.rateLimitChange)
+    .parameter(0)
+    .items.toHaveProperty("maxTokens");
 
   const invalid = {
     name: "bad",
-    rateLimit: {
-      type: "requestLimit",
-      interval: 1000,
-      tokensToAdd: 1,
-      maxTokens: 5,
-    },
+    rateLimit: [
+      {
+        type: "requestLimit",
+        interval: 1000,
+        tokensToAdd: 1,
+        maxTokens: 5,
+      },
+    ],
     // @ts-expect-error a requestLimit client cannot become concurrencyLimit
-    rateLimitChange: () => ({ type: "concurrencyLimit", maxConcurrency: 2 }),
+    rateLimitChange: () => [{ type: "concurrencyLimit", maxConcurrency: 2 }],
   } satisfies CreateClientData<RequestLimitClientOptions>;
   void invalid;
 });
 
 it("keeps dynamic client configs and documented shared updates compatible", () => {
-  const dynamicLimit: RateLimitData = {
-    type: "concurrencyLimit",
-    maxConcurrency: 2,
-  };
+  const dynamicLimit: RateLimitData[] = [
+    { type: "concurrencyLimit", maxConcurrency: 2 },
+  ];
   const dynamic: CreateClientData = {
     name: "dynamic",
     rateLimit: dynamicLimit,
@@ -76,15 +80,21 @@ it("keeps dynamic client configs and documented shared updates compatible", () =
 
   const shared = {
     name: "child",
-    rateLimit: { type: "sharedLimit", clientName: "parent" },
-    rateLimitChange: (_old: SharedLimitClientOptions) => ({
-      type: "requestLimit" as const,
-      interval: 1000,
-      tokensToAdd: 1,
-      maxTokens: 2,
-    }),
+    rateLimit: [{ type: "sharedLimit", clientName: "parent" }],
+    rateLimitChange: (
+      _old: (SharedLimitClientOptions & { name: string })[]
+    ) => [
+      {
+        type: "requestLimit" as const,
+        interval: 1000,
+        tokensToAdd: 1,
+        maxTokens: 2,
+      },
+    ],
   } satisfies CreateClientData<SharedLimitClientOptions>;
-  expectTypeOf(shared.rateLimitChange).returns.toHaveProperty("maxTokens");
+  expectTypeOf(shared.rateLimitChange).returns.items.toHaveProperty(
+    "maxTokens"
+  );
 });
 
 it("keeps response payloads unknown unless the caller supplies a type", () => {

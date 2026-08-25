@@ -33,7 +33,7 @@ describe.each(harnesses(4))("noLimit — $name", (harness) => {
     withHandler(
       harness,
       upstream.baseURL,
-      [{ name: "nl", rateLimit: { type: "noLimit" } }],
+      [{ name: "nl", rateLimit: [{ type: "noLimit" }] }],
       fn
     );
 
@@ -77,9 +77,8 @@ describe.each(harnesses(4))("noLimit — $name", (harness) => {
   it("reports its type in stats", async () => {
     await run(async (handler) => {
       await fire(handler, CLIENT);
-      expect(await handler.getClientStats(CLIENT)).toMatchObject({
-        rateLimit: { type: "noLimit" },
-      });
+      const { rateLimit } = await handler.getClientStats(CLIENT);
+      expect(rateLimit).toEqual([{ type: "noLimit", name: "default" }]);
     });
   }, 30_000);
 });

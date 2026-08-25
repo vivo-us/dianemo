@@ -64,12 +64,14 @@ declare module "@dianemo/core" {
 await handler.registerClientTemplate("acme", (creds) => [
   {
     name: buildClientName("acme", creds),
-    rateLimit: {
-      type: "requestLimit",
-      interval: 1000,
-      tokensToAdd: 100,
-      maxTokens: 100,
-    },
+    rateLimit: [
+      {
+        type: "requestLimit",
+        interval: 1000,
+        tokensToAdd: 100,
+        maxTokens: 100,
+      },
+    ],
     requestOptions: { defaults: { baseURL: creds.baseUrl } },
   },
 ]);

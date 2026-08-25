@@ -90,12 +90,14 @@ describe("audit round 3 regressions", () => {
       backend,
       defaultClientOptions: {
         name: "default",
-        rateLimit: {
-          type: "requestLimit",
-          interval: 60_000,
-          tokensToAdd: 1,
-          maxTokens: 1,
-        },
+        rateLimit: [
+          {
+            type: "requestLimit",
+            interval: 60_000,
+            tokensToAdd: 1,
+            maxTokens: 1,
+          },
+        ],
         requestOptions: { defaults: { baseURL: target.baseURL } },
       },
     });
@@ -112,7 +114,7 @@ describe("audit round 3 regressions", () => {
     ).rejects.toBeInstanceOf(RequestAbortedError);
     expect(target.hits()).toBe(0);
     const state = await backend.getTokenBucketState(
-      "requestHandler:default:rateLimit",
+      "requestHandler:default:rateLimit:default",
       { interval: 60_000, tokensToAdd: 1, maxTokens: 1 }
     );
     expect(state.tokens).toBe(1);
@@ -132,7 +134,7 @@ describe("audit round 3 regressions", () => {
       },
       defaultClientOptions: {
         name: "default",
-        rateLimit: { type: "noLimit" },
+        rateLimit: [{ type: "noLimit" }],
         requestOptions: {
           defaults: { baseURL: target.baseURL },
           responseInterceptor: () => {
@@ -238,12 +240,14 @@ describe("audit round 3 regressions", () => {
       backend,
       defaultClientOptions: {
         name: "default",
-        rateLimit: {
-          type: "requestLimit",
-          interval: 60_000,
-          tokensToAdd: 1,
-          maxTokens: 1,
-        },
+        rateLimit: [
+          {
+            type: "requestLimit",
+            interval: 60_000,
+            tokensToAdd: 1,
+            maxTokens: 1,
+          },
+        ],
         requestOptions: { defaults: { baseURL: target.baseURL } },
       },
     });
@@ -285,7 +289,7 @@ describe("audit round 3 regressions", () => {
       backend,
       defaultClientOptions: {
         name: "default",
-        rateLimit: { type: "concurrencyLimit", maxConcurrency: 1 },
+        rateLimit: [{ type: "concurrencyLimit", maxConcurrency: 1 }],
         healthCheckIntervalMs: 5,
         requestOptions: { defaults: { baseURL: target.baseURL } },
       },
@@ -300,13 +304,13 @@ describe("audit round 3 regressions", () => {
     });
     const deadline = Date.now() + 1000;
     let state = await backend.getConcurrencyState(
-      "requestHandler:default:concurrency",
+      "requestHandler:default:concurrency:default",
       120_000
     );
     while (state.currentConcurrency !== 0 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 10));
       state = await backend.getConcurrencyState(
-        "requestHandler:default:concurrency",
+        "requestHandler:default:concurrency:default",
         120_000
       );
     }
@@ -380,7 +384,7 @@ describe("audit round 3 regressions", () => {
       backend,
       defaultClientOptions: {
         name: "default",
-        rateLimit: { type: "concurrencyLimit", maxConcurrency: 1 },
+        rateLimit: [{ type: "concurrencyLimit", maxConcurrency: 1 }],
       },
     });
     handlers.push(handler);

@@ -1,8 +1,8 @@
 # Choosing a rate limit
 
-Every client declares exactly one `rateLimit`. The choice decides how the client
-behaves when requests compete, so match it to the limit the vendor actually
-publishes rather than to whichever is easiest to configure.
+`rateLimit` is a list of limits — usually one, sometimes several. The choice
+decides how the client behaves when requests compete, so match it to the limit
+the vendor actually publishes rather than to whichever is easiest to configure.
 
 | Type                                       | Use when the vendor limits            | Config                                 |
 | ------------------------------------------ | ------------------------------------- | -------------------------------------- |
@@ -10,6 +10,7 @@ publishes rather than to whichever is easiest to configure.
 | [`requestLimit`](request-limit.md)         | requests per unit of time             | `interval`, `tokensToAdd`, `maxTokens` |
 | [`concurrencyLimit`](concurrency-limit.md) | requests in flight at once            | `maxConcurrency`                       |
 | [`sharedLimit`](shared-limit.md)           | one budget across several credentials | `clientName`                           |
+| [several at once](multiple-limits.md)      | more than one of the above at once     | a `name` per limit                     |
 
 ## The quick decision
 
@@ -21,6 +22,9 @@ publishes rather than to whichever is easiest to configure.
   `sharedLimit` on the client that owns the budget.
 - Internal service, or a vendor whose limit you genuinely do not need to
   respect → `noLimit`.
+- The vendor says **"20 per second and 50,000 per day"**, or **"10 per second
+  and at most 3 concurrent"** → [several](multiple-limits.md) of the above in one
+  list. A request is sent only when every one of them admits it.
 
 Rate limits are not either/or across a deployment: each client picks its own, so
 one handler routinely runs all four at once.
@@ -90,7 +94,8 @@ The freeze duration is floored at **1000ms** for the types that derive it from
 the configured back-off, `concurrencyLimit` and `noLimit`. `requestLimit` floors
 its freeze at the refill interval instead, since a freeze empties the bucket and
 is not over until the bucket can refill; a `sharedLimit` child floors it at its
-parent's. The same floor catches a `retryBackoffBaseTime` that is negative or
+parent's, and a client with [several limits](multiple-limits.md) at the shortest
+of its own. The same floor catches a `retryBackoffBaseTime` that is negative or
 `NaN` — a `rateLimitChange` reading a header the vendor omitted is the usual
 source, and a negative would otherwise put `frozenUntil` in the past and leave
 the client in permanent single-probe thaw.

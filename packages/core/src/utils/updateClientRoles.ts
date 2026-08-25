@@ -1,5 +1,6 @@
 import type { RequestHandlerMetadata } from "../types.js";
 import type { BatchOp } from "../backend/types.js";
+import { isSharedLimitOnly } from "./rateLimit.js";
 import type RequestHandler from "../index.js";
 
 /**
@@ -25,7 +26,11 @@ async function updateClientRoles(this: RequestHandler, isStartup = false) {
   let hasChanges = false;
   for (const [name, client] of this.clients) {
     const rateLimit = client.getRateLimit();
-    const worker = clientsBefore.has(name) || rateLimit.type === "sharedLimit";
+    // A `sharedLimit` client has no queue of its own — it was constructed with the
+    // owner's name, so the owner's controller drains it. It is the only limit such
+    // a client may declare, which is what keeps one controller per budget.
+    const borrowsWholeQueue = isSharedLimitOnly(rateLimit);
+    const worker = clientsBefore.has(name) || borrowsWholeQueue;
     const newRole = worker ? "worker" : "controller";
     if (client.getRole() === newRole) continue;
     await client.updateRole(newRole);

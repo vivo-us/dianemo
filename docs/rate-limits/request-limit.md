@@ -54,7 +54,7 @@ Setting `maxTokens` above `tokensToAdd` lets an idle client accumulate and then
 spend a burst:
 
 ```ts
-{ type: "requestLimit", interval: 1000, tokensToAdd: 4, maxTokens: 8 }
+rateLimit: [{ type: "requestLimit", interval: 1000, tokensToAdd: 4, maxTokens: 8 }]
 ```
 
 This client sustains 4/s but can spend 8 immediately after being idle. Use it

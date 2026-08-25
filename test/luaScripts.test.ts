@@ -17,6 +17,11 @@ import { fileURLToPath } from "node:url";
  * of arguments, and a script that is registered but never called or called but
  * never registered.
  *
+ * The three multi-limit scripts are registered `"variadic"`, so the key-count
+ * assertions cannot apply to them: their key list comes from a client's
+ * configuration. They are held to the rest instead, plus the one thing that
+ * justifies the exemption — that they address `KEYS` by a computed index.
+ *
  * What they do NOT catch: two arguments of the same arity swapped for each other.
  * Every count stays identical, so the transposed-TTL hazard described in
  * `lua/concurrency.ts` survives all six assertions — that one still needs the
@@ -99,6 +104,8 @@ interface CallSite {
   count: number;
   /** Spread arguments, which supply a trailing run the script reads via `#ARGV`. */
   spreads: number;
+  /** Whether the site passes its key list explicitly, via `ctx.runVariadic`. */
+  variadic: boolean;
 }
 
 /**
@@ -108,9 +115,13 @@ interface CallSite {
  * calls, template literals and object literals, all of which carry commas that
  * are not argument separators.
  */
-function callSites(source: string, file: string): CallSite[] {
+function callSites(
+  source: string,
+  file: string,
+  marker = "ctx.run("
+): CallSite[] {
   const sites: CallSite[] = [];
-  const marker = "ctx.run(";
+  const variadic = marker === "ctx.runVariadic(";
 
   for (let at = source.indexOf(marker); at !== -1;) {
     let i = at + marker.length;
@@ -159,6 +170,7 @@ function callSites(source: string, file: string): CallSite[] {
         script: name[1],
         count: args.length - 1,
         spreads: args.filter((a) => a.startsWith("...")).length,
+        variadic,
       });
     }
     at = source.indexOf(marker, i);
@@ -168,17 +180,25 @@ function callSites(source: string, file: string): CallSite[] {
 }
 
 const scripts = Object.entries(SCRIPTS);
+const fixedKeyScripts = scripts.flatMap(([name, { keys, lua }]) =>
+  typeof keys === "number" ? [{ name, keys, lua }] : []
+);
+const variadicScripts = scripts.filter(([, { keys }]) => keys === "variadic");
 
 const sites = readdirSync(OPS_DIR)
   .filter((f) => f.endsWith(".ts"))
-  .flatMap((f) =>
-    callSites(stripComments(readFileSync(OPS_DIR + f, "utf8")), f)
-  );
+  .flatMap((f) => {
+    const source = stripComments(readFileSync(OPS_DIR + f, "utf8"));
+    return [
+      ...callSites(source, f),
+      ...callSites(source, f, "ctx.runVariadic("),
+    ];
+  });
 
 describe("lua argument contract", () => {
   it("registers each script under the highest key index it reads", () => {
-    const wrong = scripts
-      .map(([name, { keys, lua }]) => {
+    const wrong = fixedKeyScripts
+      .map(({ name, keys, lua }) => {
         const read = readIndices(lua, "KEYS");
         const highest = read.length ? Math.max(...read) : 0;
         return { name, keys, highest };
@@ -189,8 +209,8 @@ describe("lua argument contract", () => {
   });
 
   it("reads every key it registers, with no gaps and none beyond the count", () => {
-    const wrong = scripts
-      .map(([name, { keys, lua }]) => {
+    const wrong = fixedKeyScripts
+      .map(({ name, keys, lua }) => {
         const read = readIndices(lua, "KEYS");
         const missing = Array.from({ length: keys }, (_, i) => i + 1).filter(
           (n) => !read.includes(n)
@@ -229,7 +249,10 @@ describe("lua argument contract", () => {
     const expected = new Map(
       scripts.map(([name, { keys, lua }]) => {
         const argv = readIndices(lua, "ARGV");
-        return [name, keys + (argv.length ? Math.max(...argv) : 0)];
+        // A variadic script is handed one argument for its whole key list, in
+        // place of the fixed run of key arguments the others spell out.
+        const keyArgs = keys === "variadic" ? 1 : keys;
+        return [name, keyArgs + (argv.length ? Math.max(...argv) : 0)];
       })
     );
 
@@ -251,6 +274,29 @@ describe("lua argument contract", () => {
     const unknown = sites.filter((s) => !registered.has(s.script));
 
     expect(unknown).toEqual([]);
+  });
+
+  it("addresses KEYS dynamically in every script registered variadic", () => {
+    // The exemption from the key-count assertions is earned by this: a script
+    // reading only literal indices has a fixed key count and should declare it,
+    // where ioredis can check the call site against it.
+    const wrong = variadicScripts
+      .map(([name, { lua }]) => ({
+        name,
+        dynamic: /KEYS\[\s*(?!\d+\s*\])/.test(luaCode(lua)),
+      }))
+      .filter(({ dynamic }) => !dynamic);
+
+    expect(wrong).toEqual([]);
+  });
+
+  it("passes its key list explicitly at every variadic call site", () => {
+    const variadicNames = new Set(variadicScripts.map(([name]) => name));
+    const wrong = sites.filter(
+      (site) => variadicNames.has(site.script) !== site.variadic
+    );
+
+    expect(wrong).toEqual([]);
   });
 
   it("calls every script it registers, so a dead script cannot linger", () => {

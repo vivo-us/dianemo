@@ -4,7 +4,7 @@ Caps how many requests are **in flight at once**, rather than how many are sent
 per unit of time.
 
 ```ts
-{ type: "concurrencyLimit", maxConcurrency: 5 }
+rateLimit: [{ type: "concurrencyLimit", maxConcurrency: 5 }]
 ```
 
 ## When to use it

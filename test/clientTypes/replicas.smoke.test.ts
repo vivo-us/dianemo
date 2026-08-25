@@ -21,7 +21,7 @@ describe.skipIf(!HAS_REDIS)("multi-replica rig", () => {
         {
           count: 3,
           baseURL: upstream.baseURL,
-          clients: [{ name: "mr1", rateLimit: { type: "noLimit" } }],
+          clients: [{ name: "mr1", rateLimit: [{ type: "noLimit" }] }],
           redisDb: 14,
           keyPrefix: "mr1",
         },
@@ -51,12 +51,14 @@ describe.skipIf(!HAS_REDIS)("multi-replica rig", () => {
           clients: [
             {
               name: "mr2",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 10,
-                tokensToAdd: 10,
-                interval: 1000,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 10,
+                  tokensToAdd: 10,
+                  interval: 1000,
+                },
+              ],
             },
           ],
           redisDb: 14,
@@ -100,12 +102,14 @@ describe.skipIf(!HAS_REDIS)("multi-replica rig", () => {
               // and be admitted by the OTHER replica via
               // `requestReady:<ownerId>` rather than an in-process handover.
               name: "mr3",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 1,
-                tokensToAdd: 1,
-                interval: 400,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 1,
+                  tokensToAdd: 1,
+                  interval: 400,
+                },
+              ],
             },
           ],
           redisDb: 14,
@@ -150,12 +154,14 @@ describe.skipIf(!HAS_REDIS)("multi-replica rig", () => {
           clients: [
             {
               name: "mr4",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 4,
-                tokensToAdd: 4,
-                interval: 60_000,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 4,
+                  tokensToAdd: 4,
+                  interval: 60_000,
+                },
+              ],
             },
           ],
           redisDb: 14,
@@ -171,7 +177,7 @@ describe.skipIf(!HAS_REDIS)("multi-replica rig", () => {
           await fire(replicas[0], client);
 
           const seenByPeer = await replicas[1].getClientStats(client);
-          expect(seenByPeer.rateLimit).toMatchObject({ tokens: 2 });
+          expect(seenByPeer.rateLimit[0]).toMatchObject({ tokens: 2 });
           expect(upstream.servedCount()).toBe(2);
         }
       );

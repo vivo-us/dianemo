@@ -20,8 +20,8 @@ describe.each(harnesses(7))("sharedLimit — $name", (harness) => {
   });
 
   const PARENT = "parent:_:a";
-  const PARENT_BUCKET = "ct:requestHandler:parent:_:a:rateLimit";
-  const CHILD_BUCKET = "ct:requestHandler:child:_:a:rateLimit";
+  const PARENT_BUCKET = "ct:requestHandler:parent:_:a:rateLimit:default";
+  const CHILD_BUCKET = "ct:requestHandler:child:_:a:rateLimit:default";
 
   const run = (
     parentLimit: Record<string, unknown>,
@@ -32,10 +32,13 @@ describe.each(harnesses(7))("sharedLimit — $name", (harness) => {
       upstream.baseURL,
       [
         // Order matters: the child resolves its parent by name at construction.
-        { name: "parent", rateLimit: { type: "requestLimit", ...parentLimit } },
+        {
+          name: "parent",
+          rateLimit: [{ type: "requestLimit", ...parentLimit }],
+        },
         {
           name: "child",
-          rateLimit: { type: "sharedLimit", clientName: PARENT },
+          rateLimit: [{ type: "sharedLimit", clientName: PARENT }],
         },
       ],
       fn
@@ -104,7 +107,7 @@ describe.each(harnesses(7))("sharedLimit — $name", (harness) => {
       { interval: 1000, tokensToAdd: 100, maxTokens: 100 },
       async (handler) => {
         const stats = await handler.getClientStats("child:_:a");
-        expect(stats.rateLimit).toMatchObject({
+        expect(stats.rateLimit[0]).toMatchObject({
           type: "sharedLimit",
           clientName: PARENT,
         });
