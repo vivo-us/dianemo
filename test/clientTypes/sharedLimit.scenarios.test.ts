@@ -182,7 +182,7 @@ type Upstream = Awaited<ReturnType<typeof startServer>>;
 interface Spec {
   /** Template name; the client is registered as `<name>:_:a`. */
   name: string;
-  rateLimit: Record<string, unknown>;
+  rateLimit: Record<string, unknown>[];
   token?: string;
   /** Absolute token endpoint, for the credential-separation checks. */
   oauth2Url?: string;
@@ -354,13 +354,13 @@ describe.each(harnesses(12))("sharedLimit scenarios — $name", (harness) => {
       [
         {
           name: "parent",
-          rateLimit: { type: "requestLimit", ...parentLimit },
+          rateLimit: [{ type: "requestLimit", ...parentLimit }],
           token: "PARENT-TOKEN",
           ...extra.parent,
         },
         {
           name: "child",
-          rateLimit: { type: "sharedLimit", clientName: PARENT },
+          rateLimit: [{ type: "sharedLimit", clientName: PARENT }],
           token: "CHILD-TOKEN",
           ...extra.child,
         },
@@ -414,21 +414,23 @@ describe.each(harnesses(12))("sharedLimit scenarios — $name", (harness) => {
       [
         {
           name: "parent",
-          rateLimit: {
-            type: "requestLimit",
-            interval: 600_000,
-            tokensToAdd: 3,
-            maxTokens: 3,
-          },
+          rateLimit: [
+            {
+              type: "requestLimit",
+              interval: 600_000,
+              tokensToAdd: 3,
+              maxTokens: 3,
+            },
+          ],
         },
         {
           name: "child",
-          rateLimit: { type: "sharedLimit", clientName: PARENT },
+          rateLimit: [{ type: "sharedLimit", clientName: PARENT }],
           cleanupTimeout: 900,
         },
         {
           name: "child2",
-          rateLimit: { type: "sharedLimit", clientName: PARENT },
+          rateLimit: [{ type: "sharedLimit", clientName: PARENT }],
           cleanupTimeout: 900,
         },
       ],
@@ -558,17 +560,19 @@ describe.each(harnesses(12))("sharedLimit scenarios — $name", (harness) => {
       [
         {
           name: "parent",
-          rateLimit: {
-            type: "requestLimit",
-            interval: 60_000,
-            tokensToAdd: 20,
-            maxTokens: 20,
-          },
+          rateLimit: [
+            {
+              type: "requestLimit",
+              interval: 60_000,
+              tokensToAdd: 20,
+              maxTokens: 20,
+            },
+          ],
           oauth2Url: `${up.baseURL}/token?who=parent`,
         },
         {
           name: "child",
-          rateLimit: { type: "sharedLimit", clientName: PARENT },
+          rateLimit: [{ type: "sharedLimit", clientName: PARENT }],
           oauth2Url: `${up.baseURL}/token?who=child`,
         },
       ],
@@ -1052,11 +1056,11 @@ describe.each(harnesses(12))("sharedLimit scenarios — $name", (harness) => {
       [
         {
           name: "parent",
-          rateLimit: { type: "concurrencyLimit", maxConcurrency },
+          rateLimit: [{ type: "concurrencyLimit", maxConcurrency }],
         },
         {
           name: "child",
-          rateLimit: { type: "sharedLimit", clientName: PARENT },
+          rateLimit: [{ type: "sharedLimit", clientName: PARENT }],
           ...(childCleanupTimeout
             ? { cleanupTimeout: childCleanupTimeout }
             : {}),
@@ -1203,12 +1207,14 @@ describe.each(harnesses(12))("sharedLimit scenarios — $name", (harness) => {
       },
       {
         child: {
-          rateLimitChange: () => ({
-            type: "requestLimit",
-            interval: 60_000,
-            tokensToAdd: 2,
-            maxTokens: 2,
-          }),
+          rateLimitChange: () => [
+            {
+              type: "requestLimit",
+              interval: 60_000,
+              tokensToAdd: 2,
+              maxTokens: 2,
+            },
+          ],
         },
       }
     );
@@ -1254,12 +1260,14 @@ describe.each(harnesses(12))("sharedLimit scenarios — $name", (harness) => {
           "parent" as never,
           { instanceId: "a" } as never,
           {
-            "": {
-              type: "requestLimit",
-              interval: 1_000,
-              tokensToAdd: 7,
-              maxTokens: 7,
-            },
+            "": [
+              {
+                type: "requestLimit",
+                interval: 1_000,
+                tokensToAdd: 7,
+                maxTokens: 7,
+              },
+            ],
           }
         );
 
@@ -1308,19 +1316,21 @@ describe.each(harnesses(12))("sharedLimit scenarios — $name", (harness) => {
       [
         {
           name: "parent",
-          rateLimit: {
-            type: "requestLimit",
-            interval: 600_000,
-            tokensToAdd: tokensPerGrant,
-            maxTokens: tokensPerGrant,
-          },
+          rateLimit: [
+            {
+              type: "requestLimit",
+              interval: 600_000,
+              tokensToAdd: tokensPerGrant,
+              maxTokens: tokensPerGrant,
+            },
+          ],
           oauth2Url: `${up.baseURL}/token?who=parent`,
           isolatedGrants: true,
           cleanupTimeout: 900,
         },
         {
           name: "child",
-          rateLimit: { type: "sharedLimit", clientName: PARENT },
+          rateLimit: [{ type: "sharedLimit", clientName: PARENT }],
           token: "CHILD-TOKEN",
           cleanupTimeout: 900,
           ...(childRetryOptions ? { retryOptions: childRetryOptions } : {}),
@@ -1481,7 +1491,7 @@ describe.each(harnesses(12))("sharedLimit scenarios — $name", (harness) => {
       ((creds: { instanceId: string }) => [
         {
           name: `orphan:_:${creds.instanceId}`,
-          rateLimit: { type: "sharedLimit", clientName: "nobody:_:a" },
+          rateLimit: [{ type: "sharedLimit", clientName: "nobody:_:a" }],
         },
       ]) as never
     );
@@ -1517,20 +1527,22 @@ describe.each(harnesses(12))("sharedLimit scenarios — $name", (harness) => {
       ((creds: { instanceId: string }) => [
         {
           name: `root:_:${creds.instanceId}`,
-          rateLimit: {
-            type: "requestLimit",
-            interval: 1_000,
-            tokensToAdd: 5,
-            maxTokens: 5,
-          },
+          rateLimit: [
+            {
+              type: "requestLimit",
+              interval: 1_000,
+              tokensToAdd: 5,
+              maxTokens: 5,
+            },
+          ],
         },
         {
           name: `mid:_:${creds.instanceId}`,
-          rateLimit: { type: "sharedLimit", clientName: "root:_:a" },
+          rateLimit: [{ type: "sharedLimit", clientName: "root:_:a" }],
         },
         {
           name: `leaf:_:${creds.instanceId}`,
-          rateLimit: { type: "sharedLimit", clientName: "mid:_:a" },
+          rateLimit: [{ type: "sharedLimit", clientName: "mid:_:a" }],
         },
       ]) as never
     );
@@ -1569,16 +1581,18 @@ describe.each(harnesses(12))("sharedLimit scenarios — $name", (harness) => {
       [
         {
           name: "parent",
-          rateLimit: {
-            type: "requestLimit",
-            interval: 1_000,
-            tokensToAdd: 10,
-            maxTokens: 10,
-          },
+          rateLimit: [
+            {
+              type: "requestLimit",
+              interval: 1_000,
+              tokensToAdd: 10,
+              maxTokens: 10,
+            },
+          ],
         },
         {
           name: "child",
-          rateLimit: { type: "sharedLimit", clientName: PARENT },
+          rateLimit: [{ type: "sharedLimit", clientName: PARENT }],
           cleanupTimeout: 800,
         },
       ],
@@ -1630,14 +1644,16 @@ describe.each(harnesses(12))("sharedLimit scenarios — $name", (harness) => {
     for (const [name, rateLimit] of [
       [
         "parent",
-        {
-          type: "requestLimit",
-          interval: 600_000,
-          tokensToAdd: 1,
-          maxTokens: 1,
-        },
+        [
+          {
+            type: "requestLimit",
+            interval: 600_000,
+            tokensToAdd: 1,
+            maxTokens: 1,
+          },
+        ],
       ],
-      ["child", { type: "sharedLimit", clientName: PARENT }],
+      ["child", [{ type: "sharedLimit", clientName: PARENT }]],
     ] as const) {
       await handler.registerClientTemplate(
         name as never,

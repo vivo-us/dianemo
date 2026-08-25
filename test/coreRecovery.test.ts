@@ -121,7 +121,7 @@ function backendCases(): BackendCase[] {
 
 interface Spec {
   name: string;
-  rateLimit: Record<string, unknown>;
+  rateLimit: Record<string, unknown>[];
   requestOptions?: Record<string, unknown>;
   retryOptions?: Record<string, unknown>;
 }
@@ -258,7 +258,7 @@ for (const backendCase of backendCases()) {
             clients: [
               {
                 name: "crth",
-                rateLimit: { type: "noLimit" },
+                rateLimit: [{ type: "noLimit" }],
                 retryOptions: {
                   thawRequestCount: 2.5,
                   maxRetries: 0,
@@ -299,7 +299,7 @@ for (const backendCase of backendCases()) {
             clients: [
               {
                 name: "crad",
-                rateLimit: { type: "noLimit" },
+                rateLimit: [{ type: "noLimit" }],
                 requestOptions: { cleanupTimeout: 600 },
                 retryOptions: { maxRetries: 0 },
               },
@@ -341,12 +341,14 @@ for (const backendCase of backendCases()) {
             clients: [
               {
                 name: "crtk",
-                rateLimit: {
-                  type: "requestLimit",
-                  maxTokens: 1,
-                  tokensToAdd: 1,
-                  interval: 60_000,
-                },
+                rateLimit: [
+                  {
+                    type: "requestLimit",
+                    maxTokens: 1,
+                    tokensToAdd: 1,
+                    interval: 60_000,
+                  },
+                ],
                 requestOptions: { cleanupTimeout: 2000 },
                 retryOptions: { maxRetries: 0 },
               },
@@ -393,7 +395,7 @@ for (const backendCase of backendCases()) {
             clients: [
               {
                 name: "crsl",
-                rateLimit: { type: "concurrencyLimit", maxConcurrency: 1 },
+                rateLimit: [{ type: "concurrencyLimit", maxConcurrency: 1 }],
                 requestOptions: {
                   cleanupTimeout: 2000,
                   concurrencySlotTtl: 120_000,

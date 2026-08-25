@@ -90,12 +90,14 @@ describe("audit round 3 regressions", () => {
       backend,
       defaultClientOptions: {
         name: "default",
-        rateLimit: {
-          type: "requestLimit",
-          interval: 60_000,
-          tokensToAdd: 1,
-          maxTokens: 1,
-        },
+        rateLimit: [
+          {
+            type: "requestLimit",
+            interval: 60_000,
+            tokensToAdd: 1,
+            maxTokens: 1,
+          },
+        ],
         requestOptions: { defaults: { baseURL: target.baseURL } },
       },
     });
@@ -132,7 +134,7 @@ describe("audit round 3 regressions", () => {
       },
       defaultClientOptions: {
         name: "default",
-        rateLimit: { type: "noLimit" },
+        rateLimit: [{ type: "noLimit" }],
         requestOptions: {
           defaults: { baseURL: target.baseURL },
           responseInterceptor: () => {
@@ -238,12 +240,14 @@ describe("audit round 3 regressions", () => {
       backend,
       defaultClientOptions: {
         name: "default",
-        rateLimit: {
-          type: "requestLimit",
-          interval: 60_000,
-          tokensToAdd: 1,
-          maxTokens: 1,
-        },
+        rateLimit: [
+          {
+            type: "requestLimit",
+            interval: 60_000,
+            tokensToAdd: 1,
+            maxTokens: 1,
+          },
+        ],
         requestOptions: { defaults: { baseURL: target.baseURL } },
       },
     });
@@ -285,7 +289,7 @@ describe("audit round 3 regressions", () => {
       backend,
       defaultClientOptions: {
         name: "default",
-        rateLimit: { type: "concurrencyLimit", maxConcurrency: 1 },
+        rateLimit: [{ type: "concurrencyLimit", maxConcurrency: 1 }],
         healthCheckIntervalMs: 5,
         requestOptions: { defaults: { baseURL: target.baseURL } },
       },
@@ -380,7 +384,7 @@ describe("audit round 3 regressions", () => {
       backend,
       defaultClientOptions: {
         name: "default",
-        rateLimit: { type: "concurrencyLimit", maxConcurrency: 1 },
+        rateLimit: [{ type: "concurrencyLimit", maxConcurrency: 1 }],
       },
     });
     handlers.push(handler);

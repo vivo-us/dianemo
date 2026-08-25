@@ -4,7 +4,7 @@ Points a client at another client's budget. Several sets of credentials, one
 rate limit.
 
 ```ts
-{ type: "sharedLimit", clientName: "carrier:_:production" }
+rateLimit: [{ type: "sharedLimit", clientName: "carrier:_:production" }]
 ```
 
 ## When to use it

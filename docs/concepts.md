@@ -51,27 +51,31 @@ often have entirely different quotas.
 await handler.registerClientTemplate("acme", (creds) => [
   {
     name: buildClientName("acme", creds),
-    rateLimit: {
-      type: "requestLimit",
-      interval: 1000,
-      tokensToAdd: 100,
-      maxTokens: 100,
-    },
+    rateLimit: [
+      {
+        type: "requestLimit",
+        interval: 1000,
+        tokensToAdd: 100,
+        maxTokens: 100,
+      },
+    ],
     requestOptions: { defaults: { baseURL: creds.baseUrl } },
     authentication: {/* ... */},
     subClients: [
       {
         name: "bulk",
-        rateLimit: {
-          type: "requestLimit",
-          interval: 60_000,
-          tokensToAdd: 10,
-          maxTokens: 10,
-        },
+        rateLimit: [
+          {
+            type: "requestLimit",
+            interval: 60_000,
+            tokensToAdd: 10,
+            maxTokens: 10,
+          },
+        ],
       },
       {
         name: "search",
-        rateLimit: { type: "concurrencyLimit", maxConcurrency: 4 },
+        rateLimit: [{ type: "concurrencyLimit", maxConcurrency: 4 }],
       },
     ],
   },
@@ -154,13 +158,15 @@ keyed by sub-client path:
 ```ts
 await handler.addTemplateClient("acme", credentials, {
   rateLimitOverrides: {
-    "": { type: "requestLimit", interval: 1000, tokensToAdd: 50, maxTokens: 50 },
-    bulk: {
-      type: "requestLimit",
-      interval: 60_000,
-      tokensToAdd: 5,
-      maxTokens: 5,
-    },
+    "": [{ type: "requestLimit", interval: 1000, tokensToAdd: 50, maxTokens: 50 }],
+    bulk: [
+      {
+        type: "requestLimit",
+        interval: 60_000,
+        tokensToAdd: 5,
+        maxTokens: 5,
+      },
+    ],
   },
 });
 ```
@@ -168,11 +174,12 @@ await handler.addTemplateClient("acme", credentials, {
 `""` targets the parent; a named path targets that sub-client. A bare record of
 paths is still accepted in that argument, as it was before this grew a wrapper.
 
-**An override must keep the shape of the template default** — the same `type`,
-or an array where the default is an [array](rate-limits/multiple-limits.md). The
-merge swaps fields within the discriminant, so moving from `requestLimit` to
-`concurrencyLimit`, or from one limit to several, changes what the template said
-this client is. Either is skipped with a warning rather than applied.
+An override may retune anything about the budgets themselves — a different type,
+a different count, [several where there was one](rate-limits/multiple-limits.md).
+**The one thing it may not do is swap a client's own budget for another
+client's**: a `sharedLimit` client owns no queue, so that is a different kind of
+client rather than a different limit. Such an override is skipped with a warning
+rather than applied.
 
 This is the operator-side escape hatch and needs no permission from the template.
 For a choice the plugin itself sanctions — a subscription plan, picked from a
@@ -234,8 +241,8 @@ name:
 ```
 
 A budget carries the name of the limit that owns it, so a client declaring
-[several](rate-limits/multiple-limits.md) keeps them apart. A limit written in
-the single form is named `default`.
+[several](rate-limits/multiple-limits.md) keeps them apart. A limit declared
+without a name is named `default`.
 
 `<keyPrefix>:` is absent if you did not configure one, and spaces in a client
 name become underscores. A grant-isolated client freezes each grant separately,

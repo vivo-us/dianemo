@@ -1,4 +1,4 @@
-import type { CreateClientData, RateLimitConfig } from "./client/types.js";
+import type { CreateClientData, DeclaredRateLimit } from "./client/types.js";
 import type { DianemoBackend } from "./backend/types.js";
 import type RequestHandler from "./index.js";
 import type { Logger } from "./logger.js";
@@ -26,13 +26,13 @@ export type ClientTemplateBuilder<T = unknown> = (
  */
 export interface ClientTemplateContext {
   /** The chosen plan's limit for the root client: its `""` path. */
-  rateLimit?: RateLimitConfig;
+  rateLimit?: DeclaredRateLimit[];
   /**
    * The whole chosen plan, keyed by sub-client path the way
    * {@link RateLimitOverrides} is: `""` is the root, `"orders"` its sub-client of
    * that name, `"a:b"` a nested one.
    */
-  rateLimits?: Record<string, RateLimitConfig>;
+  rateLimits?: Record<string, DeclaredRateLimit[]>;
   /**
    * Which option was chosen. A plan usually changes more than a rate limit, so
    * this is here to branch on — sub-clients an entry-level plan does not get, a
@@ -52,7 +52,8 @@ export interface ClientTemplateContext {
  * is a limit; anything else is read as a path map. A sub-client path is never a
  * bare `type` string, so the two cannot be confused.
  */
-export type RateLimitPlan = RateLimitConfig | Record<string, RateLimitConfig>;
+export type RateLimitPlan =
+  DeclaredRateLimit[] | Record<string, DeclaredRateLimit[]>;
 
 /**
  * How a template lets callers choose its rate limit.
@@ -120,7 +121,7 @@ export interface TemplateClientOptions {
  * This is the operator-side escape hatch and needs no permission from the template.
  * For a choice the template itself sanctions, see {@link ClientTemplateOptions}.
  */
-export type RateLimitOverrides = Record<string, RateLimitConfig>;
+export type RateLimitOverrides = Record<string, DeclaredRateLimit[]>;
 
 /**
  * Registry of known client templates, so a typo at a call site is a compile error

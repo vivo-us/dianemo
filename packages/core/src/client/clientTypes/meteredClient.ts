@@ -79,8 +79,18 @@ class MeteredClient extends BaseClient {
   public handleRateLimitUpdated(data: RateLimitUpdatedData) {
     // A config this class does not build would mean a different client class,
     // which a broadcast cannot change; the rebuild path swaps one for another.
-    // Normalised on receipt, not just before publishing: an operator update or a
-    // replica running older code can present the shape a caller writes.
+    // Guarded because this arrives off pub/sub: an operator, or a replica running
+    // a version that predates the list, can publish something that is not one,
+    // and an unhandled throw here takes the subscription with it.
+    if (!Array.isArray(data.rateLimit)) {
+      this.logger.error(
+        { rateLimit: data.rateLimit },
+        `Client ${this.name} | ignoring a rate limit update that is not a list of limits`
+      );
+      return;
+    }
+    // Names resolved on receipt, not just before publishing: an update may omit
+    // them exactly as a caller may.
     const limits = normalizeRateLimit(data.rateLimit);
     if (limits.some((limit) => limit.type === "sharedLimit")) return;
     try {

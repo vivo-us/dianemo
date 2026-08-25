@@ -33,7 +33,7 @@ describe.each(harnesses(4))("noLimit — $name", (harness) => {
     withHandler(
       harness,
       upstream.baseURL,
-      [{ name: "nl", rateLimit: { type: "noLimit" } }],
+      [{ name: "nl", rateLimit: [{ type: "noLimit" }] }],
       fn
     );
 

@@ -220,12 +220,14 @@ describe.skipIf(!REDIS_URL)("a lost alive set", () => {
               // survival is measured while the budget is still empty, and the
               // caller is then served on the refill.
               name: "og",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 1,
-                tokensToAdd: 1,
-                interval: 4000,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 1,
+                  tokensToAdd: 1,
+                  interval: 4000,
+                },
+              ],
             },
           ],
           redisDb: REDIS_DB,
@@ -342,12 +344,14 @@ describe("tombstone sizing at the client", () => {
       ((creds: { instanceId: string }) => [
         {
           name: `t:_:${creds.instanceId}`,
-          rateLimit: {
-            type: "requestLimit",
-            maxTokens: 1,
-            tokensToAdd: 1,
-            interval: 300,
-          },
+          rateLimit: [
+            {
+              type: "requestLimit",
+              maxTokens: 1,
+              tokensToAdd: 1,
+              interval: 300,
+            },
+          ],
           requestOptions: {
             cleanupTimeout: 300_000,
             defaults: { baseURL: upstream.baseURL },

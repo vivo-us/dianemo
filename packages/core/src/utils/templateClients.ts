@@ -1,14 +1,13 @@
+import type { CreateClientData, DeclaredRateLimit } from "../client/types.js";
 import { collectClientNames, generateClients } from "./createClients.js";
-import { assertUsableRateLimits } from "./rateLimit.js";
 import { encrypt, decrypt } from "./encryption.js";
-import { isMultiRateLimit } from "./rateLimit.js";
 import { ConfigurationError } from "../errors.js";
 import type RequestHandler from "../index.js";
-import type {
-  CreateClientData,
-  RateLimitConfig,
-  RateLimitData,
-} from "../client/types.js";
+import {
+  assertUsableRateLimits,
+  isSharedLimitOnly,
+  normalizeRateLimit,
+} from "./rateLimit.js";
 import type {
   ClientTemplateContext,
   ClientTemplateOptions,
@@ -168,8 +167,10 @@ export function assertTemplateOptions(
   if (declared) {
     for (const [key, plan] of Object.entries(declared)) {
       for (const [path, rateLimit] of Object.entries(planPaths(plan))) {
+        // Names resolved first, as `createClient` will: a plan whose two limits
+        // both take the default is a duplicate, and the deploy should say so.
         assertUsableRateLimits(
-          rateLimit,
+          normalizeRateLimit(rateLimit),
           `${templateName} (option "${key}"${path === "" ? "" : `, path "${path}"`})`
         );
       }
@@ -348,21 +349,14 @@ function resolveTemplateContext(
 /**
  * A plan as the path map everything downstream works in.
  *
- * A plan may name one limit for the root client or a limit per sub-client path,
- * and the two are told apart by shape: an array, or an object carrying a string
- * `type`, is a limit. A path map's values are limits and its keys are sub-client
- * paths, so its own `type` — if a sub-client is somehow called that — holds an
- * object rather than a string, which is why the discriminant is the value's type
- * and not merely the key's presence.
+ * A plan is either the root client's limits or a limit list per sub-client path,
+ * and since a limit list is always an array, `Array.isArray` tells them apart
+ * outright — no inspecting the value to guess which it is.
  */
 export function planPaths(
   plan: RateLimitPlan
-): Record<string, RateLimitConfig> {
-  if (Array.isArray(plan)) return { "": plan };
-  if (typeof (plan as { type?: unknown }).type === "string") {
-    return { "": plan as RateLimitConfig };
-  }
-  return plan as Record<string, RateLimitConfig>;
+): Record<string, DeclaredRateLimit[]> {
+  return Array.isArray(plan) ? { "": plan } : plan;
 }
 
 /**
@@ -381,7 +375,7 @@ function applyPlan(
   this: RequestHandler,
   templateName: string,
   clients: CreateClientData[],
-  rateLimits: Record<string, RateLimitConfig>
+  rateLimits: Record<string, DeclaredRateLimit[]>
 ): void {
   const applied = new Set<string>();
   const walk = (client: CreateClientData, path: string): void => {
@@ -412,7 +406,9 @@ function applyOverrides(
 ): void {
   const override = overrides[path];
   if (override !== undefined) {
-    const existing: RateLimitConfig = client.rateLimit ?? { type: "noLimit" };
+    const existing: DeclaredRateLimit[] = client.rateLimit ?? [
+      { type: "noLimit" },
+    ];
     const mismatch = describeShapeMismatch(existing, override);
     if (mismatch) {
       this.logger.warn(
@@ -433,26 +429,21 @@ function applyOverrides(
 /**
  * Why an override may not replace a template default, or `undefined` when it may.
  *
- * An override swaps fields within the shape the template declared; it does not
- * change which client class is built. One limit may only be replaced by one of
- * the same type, and several only by several — a single-to-array swap would turn
- * a `requestLimit` client into a multi-limit one behind the template's back.
+ * An override retunes budgets the template declared; it does not change what
+ * kind of client is built. Only one distinction still does that: a client that
+ * borrows another's budget owns no queue, so swapping a `sharedLimit` for
+ * budgets of its own — or the reverse — is a different client, not a different
+ * limit. Everything else an override may freely change.
  */
 function describeShapeMismatch(
-  existing: RateLimitConfig,
-  override: RateLimitConfig
+  existing: readonly DeclaredRateLimit[],
+  override: readonly DeclaredRateLimit[]
 ): string | undefined {
-  const existingIsMulti = isMultiRateLimit(existing);
-  if (existingIsMulti !== isMultiRateLimit(override)) {
-    return existingIsMulti
-      ? "declares one rate limit but the template default declares several"
-      : "declares several rate limits but the template default declares one";
-  }
-  if (existingIsMulti) return undefined;
-  const overrideType = (override as RateLimitData).type;
-  const existingType = (existing as RateLimitData).type;
-  if (overrideType === existingType) return undefined;
-  return `has type "${overrideType}" but the template default is "${existingType}"`;
+  const existingIsShared = isSharedLimitOnly(existing);
+  if (existingIsShared === isSharedLimitOnly(override)) return undefined;
+  return existingIsShared
+    ? "declares budgets of its own where the template default shares another client's"
+    : "shares another client's budget where the template default declares its own";
 }
 
 export async function destroyTemplateClients(

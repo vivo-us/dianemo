@@ -290,7 +290,7 @@ describe.each(harnesses(11))(
       maxConcurrency: number,
       extra: Record<string, unknown> = {}
     ) => ({
-      rateLimit: { type: "concurrencyLimit", maxConcurrency },
+      rateLimit: [{ type: "concurrencyLimit", maxConcurrency }],
       requestOptions: { defaults: { baseURL: up.baseURL } },
       retryOptions: { maxRetries: 0, retryBackoffBaseTime: 20 },
       ...extra,
@@ -1275,7 +1275,7 @@ describe.each(harnesses(11))(
           [
             {
               name: "cw",
-              rateLimit: { type: "concurrencyLimit", maxConcurrency: 3 },
+              rateLimit: [{ type: "concurrencyLimit", maxConcurrency: 3 }],
             },
           ],
           async (handler) => {
@@ -1293,7 +1293,7 @@ describe.each(harnesses(11))(
           [
             {
               name: "cw",
-              rateLimit: { type: "concurrencyLimit", maxConcurrency: 25 },
+              rateLimit: [{ type: "concurrencyLimit", maxConcurrency: 25 }],
             },
           ],
           async (handler) => {
@@ -1403,7 +1403,7 @@ describe.each(harnesses(11))(
             (() => [
               {
                 name: clientName,
-                rateLimit: { type: "concurrencyLimit", maxConcurrency: 3 },
+                rateLimit: [{ type: "concurrencyLimit", maxConcurrency: 3 }],
                 requestOptions: { defaults: { baseURL: up.baseURL } },
                 retryOptions: { maxRetries: 0, retryBackoffBaseTime: 999 },
               },

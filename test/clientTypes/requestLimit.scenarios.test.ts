@@ -246,7 +246,7 @@ async function withClient(
     (() => [
       {
         name: CLIENT,
-        rateLimit: { type: "requestLimit", ...options.rateLimit },
+        rateLimit: [{ type: "requestLimit", ...options.rateLimit }],
         ...options.client,
         requestOptions: {
           ...(options.client?.requestOptions as object),
@@ -834,12 +834,14 @@ describe.each(harnesses(10))("requestLimit scenarios — $name", (harness) => {
       (() => [
         {
           name: CLIENT,
-          rateLimit: {
-            type: "requestLimit",
-            interval: 30_000,
-            tokensToAdd: 1,
-            maxTokens: 1,
-          },
+          rateLimit: [
+            {
+              type: "requestLimit",
+              interval: 30_000,
+              tokensToAdd: 1,
+              maxTokens: 1,
+            },
+          ],
           requestOptions: { defaults: { baseURL: upstream.baseURL } },
         },
       ]) as never
@@ -1429,12 +1431,14 @@ describe.each(harnesses(10))("requestLimit scenarios — $name", (harness) => {
           `rls:requestHandler:rateLimitUpdated`,
           JSON.stringify({
             clientName: CLIENT,
-            rateLimit: {
-              type: "requestLimit",
-              interval: 500,
-              tokensToAdd: 4,
-              maxTokens: 4,
-            },
+            rateLimit: [
+              {
+                type: "requestLimit",
+                interval: 500,
+                tokensToAdd: 4,
+                maxTokens: 4,
+              },
+            ],
             source: "operator",
             publisherInstanceId: "operator-console",
           })

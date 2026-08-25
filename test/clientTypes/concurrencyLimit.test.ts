@@ -28,7 +28,12 @@ describe.each(harnesses(6))("concurrencyLimit — $name", (harness) => {
     withHandler(
       harness,
       upstream.baseURL,
-      [{ name: "cl", rateLimit: { type: "concurrencyLimit", maxConcurrency } }],
+      [
+        {
+          name: "cl",
+          rateLimit: [{ type: "concurrencyLimit", maxConcurrency }],
+        },
+      ],
       fn
     );
 

@@ -1,4 +1,4 @@
-import type { NamedRateLimitData } from "../packages/core/src/client/types.js";
+import type { DeclaredRateLimit } from "../packages/core/src/client/types.js";
 import { memoryBackend } from "../packages/core/src/backend/memory.js";
 import { ConfigurationError } from "../packages/core/src/errors.js";
 import RequestHandler from "../packages/core/src/index.js";
@@ -22,12 +22,14 @@ import type {
 
 const KEY = "0123456789abcdef0123456789abcdef";
 
-const FREE = {
-  type: "requestLimit" as const,
-  interval: 1000,
-  tokensToAdd: 2,
-  maxTokens: 2,
-};
+const FREE = [
+  {
+    type: "requestLimit" as const,
+    interval: 1000,
+    tokensToAdd: 2,
+    maxTokens: 2,
+  },
+];
 const PRO = [
   {
     name: "per_second",
@@ -59,7 +61,7 @@ interface Rig {
  */
 async function build(
   options: ClientTemplateOptions,
-  fallback: unknown = { type: "noLimit" }
+  fallback: unknown = [{ type: "noLimit" }]
 ): Promise<Rig> {
   const backend = memoryBackend();
   const handler = new RequestHandler({ key: KEY, backend, keyPrefix: "tro" });
@@ -94,25 +96,15 @@ async function build(
 }
 
 /**
- * A client's limits as the plan that produced them was written.
- *
- * Only the synthesised name comes off: a caller writing one unnamed limit is
- * given `"default"` internally, and stripping a name the plan actually declared
- * would make these assertions unable to tell one plan from another.
+ * A declared plan as the client will report it: every limit named, with an
+ * omitted name resolved to `default`. Mirrors what `createClient` does, so these
+ * assertions read as the plans were written.
  */
-const asDeclared = (limits: NamedRateLimitData[] | undefined) => {
-  if (!limits) return undefined;
-  if (limits.length === 1 && limits[0].name === "default") {
-    const { name: _name, ...bare } = limits[0];
-    return bare;
-  }
-  return limits;
-};
+const withNames = (limits: DeclaredRateLimit[]) =>
+  limits.map((limit) => ({ ...limit, name: limit.name ?? "default" }));
 
 const limitOf = (handler: RequestHandler) =>
-  asDeclared(
-    handler.getLoadedClients().find((c) => c.name === "acme:_:a")?.rateLimit
-  );
+  handler.getLoadedClients().find((c) => c.name === "acme:_:a")?.rateLimit;
 
 describe("rate limits a template offers its callers", () => {
   it("hands the builder the chosen plan's limit and its key", async () => {
@@ -126,7 +118,7 @@ describe("rate limits a template offers its callers", () => {
 
       expect(rig.seen()?.rateLimitOption).toBe("pro");
       expect(rig.seen()?.rateLimit).toEqual(PRO);
-      expect(limitOf(rig.handler)).toEqual(PRO);
+      expect(limitOf(rig.handler)).toEqual(withNames(PRO));
     } finally {
       await rig.stop();
     }
@@ -146,7 +138,7 @@ describe("rate limits a template offers its callers", () => {
       );
 
       expect(rig.seen()?.rateLimitOption).toBe("free");
-      expect(limitOf(rig.handler)).toEqual(FREE);
+      expect(limitOf(rig.handler)).toEqual(withNames(FREE));
     } finally {
       await rig.stop();
     }
@@ -166,7 +158,7 @@ describe("rate limits a template offers its callers", () => {
       );
 
       expect(rig.seen()).toEqual({});
-      expect(limitOf(rig.handler)).toEqual({ type: "noLimit" });
+      expect(limitOf(rig.handler)).toEqual(withNames([{ type: "noLimit" }]));
     } finally {
       await rig.stop();
     }
@@ -247,7 +239,7 @@ describe("rate limits a template offers its callers", () => {
       await rig.handler.rebuildTemplateClient("acme", "a");
 
       expect(rig.seen()?.rateLimitOption).toBe("pro");
-      expect(limitOf(rig.handler)).toEqual(PRO);
+      expect(limitOf(rig.handler)).toEqual(withNames(PRO));
     } finally {
       await rig.stop();
     }
@@ -271,13 +263,13 @@ describe("rate limits a template offers its callers", () => {
         ((creds: { instanceId: string }, ctx: ClientTemplateContext) => [
           {
             name: `acme:_:${creds.instanceId}`,
-            rateLimit: ctx.rateLimit ?? { type: "noLimit" },
+            rateLimit: ctx.rateLimit ?? [{ type: "noLimit" }],
           },
         ]) as never,
         { rateLimitOptions: { free: FREE } }
       );
 
-      expect(limitOf(rig.handler)).toEqual({ type: "noLimit" });
+      expect(limitOf(rig.handler)).toEqual(withNames([{ type: "noLimit" }]));
     } finally {
       await rig.stop();
     }
@@ -303,18 +295,29 @@ describe("what a template may declare", () => {
     await expect(
       register({
         rateLimitOptions: {
-          broken: { ...FREE, tokensToAdd: 0 },
+          broken: [{ ...FREE[0], tokensToAdd: 0 }],
         },
       })
     ).rejects.toThrow(/unusable requestLimit/);
   });
 
-  it("refuses a multi-limit plan with an unnamed entry", async () => {
+  it("refuses a plan whose limits would share one budget", async () => {
+    // A name may be omitted once, where it is `default`. Omitting it twice is
+    // two limits metering against one bucket, which is caught at registration
+    // rather than at the first tenant who picks the plan.
     await expect(
       register({
-        rateLimitOptions: { pro: [{ ...FREE }] as never },
+        rateLimitOptions: { pro: [{ ...FREE[0] }, { ...FREE[0] }] },
       })
-    ).rejects.toThrow(/needs a name/);
+    ).rejects.toThrow(/two rate limits without a name/);
+  });
+
+  it("accepts a plan that names its limits", async () => {
+    const rig = await register({
+      rateLimitOptions: { pro: PRO },
+      defaultRateLimitOption: "pro",
+    });
+    await rig.stop();
   });
 });
 
@@ -327,13 +330,15 @@ describe("what a template may declare", () => {
  * budget is, and core places them.
  */
 describe("a plan that covers sub-clients", () => {
-  const ORDERS_STD = {
-    type: "requestLimit" as const,
-    interval: 1000,
-    tokensToAdd: 6,
-    maxTokens: 6,
-  };
-  const ORDERS_PRO = { ...ORDERS_STD, tokensToAdd: 60, maxTokens: 60 };
+  const ORDERS_STD = [
+    {
+      type: "requestLimit" as const,
+      interval: 1000,
+      tokensToAdd: 6,
+      maxTokens: 6,
+    },
+  ];
+  const ORDERS_PRO = [{ ...ORDERS_STD[0], tokensToAdd: 60, maxTokens: 60 }];
   const REPORTS_PRO = [
     {
       name: "per_second",
@@ -415,7 +420,7 @@ describe("a plan that covers sub-clients", () => {
       handler
         .getLoadedClients()
         .filter((c) => c.name.startsWith("sp:_:a"))
-        .map((c) => [c.name, asDeclared(c.rateLimit)])
+        .map((c) => [c.name, c.rateLimit])
     );
 
   it("places a limit on the root and on every sub-client", async () => {
@@ -428,10 +433,10 @@ describe("a plan that covers sub-clients", () => {
       );
 
       expect(limits(rig.handler)).toEqual({
-        "sp:_:a": PRO,
-        "sp:_:a:orders": ORDERS_PRO,
+        "sp:_:a": withNames(PRO),
+        "sp:_:a:orders": withNames(ORDERS_PRO),
         // A sub-client's own limit may itself be several.
-        "sp:_:a:reports": REPORTS_PRO,
+        "sp:_:a:reports": withNames(REPORTS_PRO),
       });
     } finally {
       await rig.stop();
@@ -453,9 +458,9 @@ describe("a plan that covers sub-clients", () => {
       );
 
       expect(limits(rig.handler)).toEqual({
-        "sp:_:a": FREE,
-        "sp:_:a:orders": ORDERS_STD,
-        "sp:_:a:reports": FREE,
+        "sp:_:a": withNames(FREE),
+        "sp:_:a:orders": withNames(ORDERS_STD),
+        "sp:_:a:reports": withNames(FREE),
       });
     } finally {
       await rig.stop();
@@ -508,14 +513,18 @@ describe("a plan that covers sub-clients", () => {
         { instanceId: "a" } as never,
         {
           rateLimitOption: "premium",
-          rateLimitOverrides: { orders: { ...ORDERS_PRO, maxTokens: 7 } },
+          rateLimitOverrides: {
+            orders: [{ ...ORDERS_PRO[0], maxTokens: 7 }],
+          },
         }
       );
 
       const loaded = limits(rig.handler);
       // The override wins for its path, and the plan still holds everywhere else.
-      expect(loaded["sp:_:a:orders"]).toEqual({ ...ORDERS_PRO, maxTokens: 7 });
-      expect(loaded["sp:_:a:reports"]).toEqual(REPORTS_PRO);
+      expect(loaded["sp:_:a:orders"]).toEqual(
+        withNames([{ ...ORDERS_PRO[0], maxTokens: 7 }])
+      );
+      expect(loaded["sp:_:a:reports"]).toEqual(withNames(REPORTS_PRO));
     } finally {
       await rig.stop();
     }
@@ -527,7 +536,10 @@ describe("a plan that covers sub-clients", () => {
     await expect(
       buildTree({
         rateLimitOptions: {
-          premium: { "": PRO, orders: { ...ORDERS_PRO, tokensToAdd: 0 } },
+          premium: {
+            "": PRO,
+            orders: [{ ...ORDERS_PRO[0], tokensToAdd: 0 }],
+          },
         },
       })
     ).rejects.toThrow(/path "orders".*unusable requestLimit/s);
@@ -542,10 +554,12 @@ describe("operator overrides beside a plan", () => {
       await rig.handler.addTemplateClient(
         "acme" as never,
         { instanceId: "a" } as never,
-        { "": { ...FREE, maxTokens: 42 } }
+        { "": [{ ...FREE[0], maxTokens: 42 }] }
       );
 
-      expect(limitOf(rig.handler)).toEqual({ ...FREE, maxTokens: 42 });
+      expect(limitOf(rig.handler)).toEqual(
+        withNames([{ ...FREE[0], maxTokens: 42 }])
+      );
     } finally {
       await rig.stop();
     }
@@ -565,11 +579,13 @@ describe("operator overrides beside a plan", () => {
       );
       await rig.backend.set(
         "tro:requestHandler:overrides:acme::a",
-        JSON.stringify({ "": { ...FREE, maxTokens: 7 } })
+        JSON.stringify({ "": [{ ...FREE[0], maxTokens: 7 }] })
       );
       await rig.handler.rebuildTemplateClient("acme", "a");
 
-      expect(limitOf(rig.handler)).toEqual({ ...FREE, maxTokens: 7 });
+      expect(limitOf(rig.handler)).toEqual(
+        withNames([{ ...FREE[0], maxTokens: 7 }])
+      );
     } finally {
       await rig.stop();
     }
@@ -584,25 +600,23 @@ describe("operator overrides beside a plan", () => {
         {
           rateLimitOption: "free",
           rateLimitOverrides: {
-            "": { ...FREE, maxTokens: 99, tokensToAdd: 99 },
+            "": [{ ...FREE[0], maxTokens: 99, tokensToAdd: 99 }],
           },
         }
       );
 
       expect(rig.seen()?.rateLimitOption).toBe("free");
-      expect(limitOf(rig.handler)).toEqual({
-        ...FREE,
-        maxTokens: 99,
-        tokensToAdd: 99,
-      });
+      expect(limitOf(rig.handler)).toEqual(
+        withNames([{ ...FREE[0], maxTokens: 99, tokensToAdd: 99 }])
+      );
     } finally {
       await rig.stop();
     }
   });
 
-  it("refuses to swap one limit for several behind the template's back", async () => {
-    // An override swaps fields within the shape the template declared; changing
-    // the shape would change which client class is built.
+  it("may retune one limit into several", async () => {
+    // One limit or several is a matter of budgets, not of what kind of client
+    // this is, so an operator may go from one to the other.
     const rig = await build({
       rateLimitOptions: { free: FREE },
       defaultRateLimitOption: "free",
@@ -614,7 +628,32 @@ describe("operator overrides beside a plan", () => {
         { rateLimitOverrides: { "": PRO } }
       );
 
-      expect(limitOf(rig.handler)).toEqual(FREE);
+      expect(limitOf(rig.handler)).toEqual(withNames(PRO));
+    } finally {
+      await rig.stop();
+    }
+  });
+
+  it("refuses to swap a client's own budget for another client's", async () => {
+    // The one distinction an override may not cross: a client that borrows
+    // another's budget owns no queue, so this is a different client rather than
+    // a different limit.
+    const rig = await build({
+      rateLimitOptions: { free: FREE },
+      defaultRateLimitOption: "free",
+    });
+    try {
+      await rig.handler.addTemplateClient(
+        "acme" as never,
+        { instanceId: "a" } as never,
+        {
+          rateLimitOverrides: {
+            "": [{ type: "sharedLimit", clientName: "somewhere:_:else" }],
+          },
+        }
+      );
+
+      expect(limitOf(rig.handler)).toEqual(withNames(FREE));
     } finally {
       await rig.stop();
     }

@@ -1,8 +1,8 @@
 # Choosing a rate limit
 
-A client declares one `rateLimit`, or an array of them. The choice decides how
-the client behaves when requests compete, so match it to the limit the vendor
-actually publishes rather than to whichever is easiest to configure.
+`rateLimit` is a list of limits — usually one, sometimes several. The choice
+decides how the client behaves when requests compete, so match it to the limit
+the vendor actually publishes rather than to whichever is easiest to configure.
 
 | Type                                       | Use when the vendor limits            | Config                                 |
 | ------------------------------------------ | ------------------------------------- | -------------------------------------- |
@@ -10,7 +10,7 @@ actually publishes rather than to whichever is easiest to configure.
 | [`requestLimit`](request-limit.md)         | requests per unit of time             | `interval`, `tokensToAdd`, `maxTokens` |
 | [`concurrencyLimit`](concurrency-limit.md) | requests in flight at once            | `maxConcurrency`                       |
 | [`sharedLimit`](shared-limit.md)           | one budget across several credentials | `clientName`                           |
-| [an array](multiple-limits.md)             | more than one of the above at once     | a `name` per entry                     |
+| [several at once](multiple-limits.md)      | more than one of the above at once     | a `name` per limit                     |
 
 ## The quick decision
 
@@ -23,8 +23,8 @@ actually publishes rather than to whichever is easiest to configure.
 - Internal service, or a vendor whose limit you genuinely do not need to
   respect → `noLimit`.
 - The vendor says **"20 per second and 50,000 per day"**, or **"10 per second
-  and at most 3 concurrent"** → [an array](multiple-limits.md) of the above. A
-  request is sent only when every entry admits it.
+  and at most 3 concurrent"** → [several](multiple-limits.md) of the above in one
+  list. A request is sent only when every one of them admits it.
 
 Rate limits are not either/or across a deployment: each client picks its own, so
 one handler routinely runs all four at once.

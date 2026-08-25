@@ -17,7 +17,7 @@ export default {
         await handler.registerClientTemplate("multi", (creds) =>
           Array.from({ length: count }, (_, i) => ({
             name: `multi:_:${creds.instanceId}:${i}`,
-            rateLimit: { type: "noLimit" },
+            rateLimit: [{ type: "noLimit" }],
             requestOptions: { defaults: { baseURL } },
           }))
         );

@@ -1,8 +1,8 @@
 import { ConfigurationError } from "../errors.js";
 import type {
   ConcurrencyLimitClientOptions,
+  DeclaredRateLimit,
   NamedRateLimitData,
-  RateLimitConfig,
   RateLimitData,
   RequestLimitClientOptions,
 } from "../client/types.js";
@@ -30,17 +30,20 @@ const RATE_LIMIT_NAME = /^[a-z0-9_]{1,64}$/;
 export const DEFAULT_RATE_LIMIT_NAME = "default";
 
 /**
- * A declared config as the array everything downstream works in.
+ * A declared list with every name resolved.
  *
- * Called once, where the client is built, so nothing past that point has to ask
- * which of the two shapes it was handed. Validate before normalising: the single
- * form is exempt from the name rule precisely because it has no name to check.
+ * Called once, where the client is built, so nothing past that point deals in
+ * anything but named limits. Names are filled before validation rather than
+ * after: two limits that both took the default are a duplicate, and reporting
+ * that is the whole reason the default is a real name and not a blank.
  */
 export function normalizeRateLimit(
-  config: RateLimitConfig
+  config: readonly DeclaredRateLimit[]
 ): NamedRateLimitData[] {
-  if (isMultiRateLimit(config)) return config;
-  return [{ ...config, name: DEFAULT_RATE_LIMIT_NAME }];
+  return config.map((limit) => ({
+    ...limit,
+    name: limit.name ?? DEFAULT_RATE_LIMIT_NAME,
+  })) as NamedRateLimitData[];
 }
 
 /**
@@ -52,9 +55,10 @@ export function normalizeRateLimit(
  * client on that budget. That is why a `sharedLimit` may not be combined with
  * other limits — see `assertUsableRateLimits` for what combining would cost.
  */
-export function isSharedLimitOnly(config: RateLimitConfig): boolean {
-  const entries = rateLimitEntries(config);
-  return entries.length === 1 && entries[0]?.type === "sharedLimit";
+export function isSharedLimitOnly(
+  config: readonly { type: RateLimitData["type"] }[]
+): boolean {
+  return config.length === 1 && config[0]?.type === "sharedLimit";
 }
 
 /** The lone limit of a config that declares exactly one, else `undefined`. */
@@ -72,20 +76,6 @@ export function hasMeteredBudget(
     (limit) =>
       limit.type === "requestLimit" || limit.type === "concurrencyLimit"
   );
-}
-
-/** Whether a client declared several limits rather than one. */
-export function isMultiRateLimit(
-  config: RateLimitConfig
-): config is NamedRateLimitData[] {
-  return Array.isArray(config);
-}
-
-/** Every limit a config declares, as a list. A single limit has no `name`. */
-export function rateLimitEntries(
-  config: RateLimitConfig
-): readonly (RateLimitData & { name?: string })[] {
-  return isMultiRateLimit(config) ? config : [config];
 }
 
 export function assertRateLimitName(name: unknown, clientName: string): void {
@@ -109,13 +99,9 @@ export function assertRateLimitName(name: unknown, clientName: string): void {
  * same limits one at a time.
  */
 export function assertUsableRateLimits(
-  config: RateLimitConfig,
+  config: readonly NamedRateLimitData[],
   clientName: string
 ): void {
-  if (!isMultiRateLimit(config)) {
-    assertUsableRateLimit(config, clientName);
-    return;
-  }
   if (config.length === 0) {
     throw new ConfigurationError(
       "invalid_rate_limit",
@@ -146,7 +132,9 @@ export function assertUsableRateLimits(
     if (seen.has(limit.name)) {
       throw new ConfigurationError(
         "invalid_rate_limit",
-        `Client "${clientName}" declares two rate limits named "${limit.name}". Names key the buckets, so duplicates would meter both limits against one balance.`
+        limit.name === DEFAULT_RATE_LIMIT_NAME
+          ? `Client "${clientName}" declares two rate limits without a name, so both took "${DEFAULT_RATE_LIMIT_NAME}". A name keys the limit's budget, so give each of them one — "per_second" and "per_day", say.`
+          : `Client "${clientName}" declares two rate limits named "${limit.name}". Names key the buckets, so duplicates would meter both limits against one balance.`
       );
     }
     seen.add(limit.name);
@@ -257,15 +245,17 @@ function describeEntry(entryName?: string): string {
  * which is reported by the queue path rather than here.
  */
 export function costCeilingFor(
-  config: RateLimitConfig,
-  resolveShared?: (clientName: string) => RateLimitConfig | undefined
+  config: readonly NamedRateLimitData[],
+  resolveShared?: (
+    clientName: string
+  ) => readonly NamedRateLimitData[] | undefined
 ): number | undefined {
   let ceiling: number | undefined;
   const consider = (value: number | undefined) => {
     if (value === undefined) return;
     ceiling = ceiling === undefined ? value : Math.min(ceiling, value);
   };
-  for (const limit of rateLimitEntries(config)) {
+  for (const limit of config) {
     if (limit.type === "requestLimit") consider(limit.maxTokens);
     else if (limit.type === "concurrencyLimit") consider(limit.maxConcurrency);
     else if (limit.type === "sharedLimit") {
@@ -287,10 +277,10 @@ export function costCeilingFor(
  * per-second limit would stand the fleet down until tomorrow.
  */
 export function shortestRefillInterval(
-  config: RateLimitConfig
+  config: readonly NamedRateLimitData[]
 ): number | undefined {
   let shortest: number | undefined;
-  for (const limit of rateLimitEntries(config)) {
+  for (const limit of config) {
     if (limit.type !== "requestLimit") continue;
     if (!Number.isFinite(limit.interval) || limit.interval <= 0) continue;
     shortest =

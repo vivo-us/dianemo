@@ -32,10 +32,13 @@ describe.each(harnesses(7))("sharedLimit — $name", (harness) => {
       upstream.baseURL,
       [
         // Order matters: the child resolves its parent by name at construction.
-        { name: "parent", rateLimit: { type: "requestLimit", ...parentLimit } },
+        {
+          name: "parent",
+          rateLimit: [{ type: "requestLimit", ...parentLimit }],
+        },
         {
           name: "child",
-          rateLimit: { type: "sharedLimit", clientName: PARENT },
+          rateLimit: [{ type: "sharedLimit", clientName: PARENT }],
         },
       ],
       fn

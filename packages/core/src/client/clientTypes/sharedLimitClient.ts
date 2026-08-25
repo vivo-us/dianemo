@@ -33,6 +33,7 @@ class SharedLimitClient extends BaseClient {
   public handleRateLimitUpdated(data: RateLimitUpdatedData) {
     // Anything else would mean a different client class, which a broadcast
     // cannot change; the rebuild path is what swaps one client for another.
+    if (!Array.isArray(data.rateLimit)) return;
     const limits = normalizeRateLimit(data.rateLimit);
     const shared = limits[0];
     if (limits.length !== 1 || shared.type !== "sharedLimit") return;

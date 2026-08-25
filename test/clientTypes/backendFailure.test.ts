@@ -181,7 +181,7 @@ async function startProxy(target: string): Promise<Proxy> {
 
 interface Spec {
   name: string;
-  rateLimit: Record<string, unknown>;
+  rateLimit: Record<string, unknown>[];
   requestOptions?: Record<string, unknown>;
   retryOptions?: Record<string, unknown>;
   healthCheckIntervalMs?: number;
@@ -422,12 +422,14 @@ describe.skipIf(!HAS_REDIS)("backend failure: script cache", () => {
           clients: [
             {
               name: "bfns",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 200,
-                tokensToAdd: 200,
-                interval: 1000,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 200,
+                  tokensToAdd: 200,
+                  interval: 1000,
+                },
+              ],
             },
           ],
         },
@@ -471,12 +473,14 @@ describe.skipIf(!HAS_REDIS)("backend failure: script cache", () => {
           clients: [
             {
               name: "bfnsr",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 100,
-                tokensToAdd: 100,
-                interval: 1000,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 100,
+                  tokensToAdd: 100,
+                  interval: 1000,
+                },
+              ],
             },
           ],
           redisDb: DB,
@@ -530,12 +534,14 @@ describe.skipIf(!HAS_REDIS)("backend failure: unreachable Redis", () => {
           clients: [
             {
               name: "bfh",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 50,
-                tokensToAdd: 50,
-                interval: 1000,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 50,
+                  tokensToAdd: 50,
+                  interval: 1000,
+                },
+              ],
             },
           ],
         },
@@ -591,12 +597,14 @@ describe.skipIf(!HAS_REDIS)("backend failure: unreachable Redis", () => {
           clients: [
             {
               name: "bfd",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 50,
-                tokensToAdd: 50,
-                interval: 1000,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 50,
+                  tokensToAdd: 50,
+                  interval: 1000,
+                },
+              ],
               retryOptions: { maxRetries: 0 },
             },
           ],
@@ -664,12 +672,14 @@ describe.skipIf(!HAS_REDIS)("backend failure: unreachable Redis", () => {
           clients: [
             {
               name: "bff",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 50,
-                tokensToAdd: 50,
-                interval: 1000,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 50,
+                  tokensToAdd: 50,
+                  interval: 1000,
+                },
+              ],
               requestOptions: { cleanupTimeout: ADMISSION_MS },
               retryOptions: { maxRetries: 0 },
             },
@@ -762,12 +772,14 @@ describe.skipIf(!HAS_REDIS)("backend failure: unreachable Redis", () => {
           clients: [
             {
               name: "bfab",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 50,
-                tokensToAdd: 50,
-                interval: 1000,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 50,
+                  tokensToAdd: 50,
+                  interval: 1000,
+                },
+              ],
               requestOptions: { cleanupTimeout: ADMISSION_MS },
               retryOptions: { maxRetries: 0 },
             },
@@ -847,12 +859,14 @@ describe.skipIf(!HAS_REDIS)("backend failure: unreachable Redis", () => {
           clients: [
             {
               name: "bfch",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 3,
-                tokensToAdd: 3,
-                interval: 60_000,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 3,
+                  tokensToAdd: 3,
+                  interval: 60_000,
+                },
+              ],
               requestOptions: { cleanupTimeout: 1500 },
               retryOptions: { maxRetries: 0 },
               healthCheckIntervalMs: 500,
@@ -909,12 +923,14 @@ describe.skipIf(!HAS_REDIS)("backend failure: unreachable Redis", () => {
           clients: [
             {
               name: "bfu",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 1,
-                tokensToAdd: 1,
-                interval: 60_000,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 1,
+                  tokensToAdd: 1,
+                  interval: 60_000,
+                },
+              ],
               requestOptions: { cleanupTimeout: 1000 },
               retryOptions: { maxRetries: 0 },
               // Fast enough that several ticks — role reconciliation, orphan
@@ -966,12 +982,14 @@ describe.skipIf(!HAS_REDIS)("backend failure: errors from a script", () => {
           clients: [
             {
               name: "bfw",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 50,
-                tokensToAdd: 50,
-                interval: 1000,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 50,
+                  tokensToAdd: 50,
+                  interval: 1000,
+                },
+              ],
               retryOptions: { maxRetries: 0 },
             },
           ],
@@ -1027,12 +1045,14 @@ describe.skipIf(!HAS_REDIS)("backend failure: partial lifecycles", () => {
           clients: [
             {
               name: "bfp",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 50,
-                tokensToAdd: 50,
-                interval: 1000,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 50,
+                  tokensToAdd: 50,
+                  interval: 1000,
+                },
+              ],
               retryOptions: { maxRetries: 0 },
             },
           ],
@@ -1092,12 +1112,14 @@ describe.skipIf(!HAS_REDIS)("backend failure: partial lifecycles", () => {
           clients: [
             {
               name: "bfpe",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 50,
-                tokensToAdd: 50,
-                interval: 1000,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 50,
+                  tokensToAdd: 50,
+                  interval: 1000,
+                },
+              ],
               // No retries, so the 503 is final and reaches the caller.
               retryOptions: { maxRetries: 0 },
             },
@@ -1137,12 +1159,14 @@ describe.skipIf(!HAS_REDIS)("backend failure: partial lifecycles", () => {
           clients: [
             {
               name: "bfst",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 1,
-                tokensToAdd: 1,
-                interval: 500,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 1,
+                  tokensToAdd: 1,
+                  interval: 500,
+                },
+              ],
               requestOptions: { cleanupTimeout: 1000 },
               retryOptions: { maxRetries: 0 },
               healthCheckIntervalMs: 500,
@@ -1206,7 +1230,7 @@ describe.skipIf(!HAS_REDIS)("backend failure: partial lifecycles", () => {
           clients: [
             {
               name: "bfsl",
-              rateLimit: { type: "concurrencyLimit", maxConcurrency: 1 },
+              rateLimit: [{ type: "concurrencyLimit", maxConcurrency: 1 }],
               requestOptions: {
                 cleanupTimeout: 1000,
                 concurrencySlotTtl: slotTtl,

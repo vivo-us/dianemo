@@ -143,7 +143,7 @@ export type { RequestConfig, RequestMetadata } from "./request/types.js";
 export type {
   CreateClientData,
   RateLimitData,
-  RateLimitConfig,
+  DeclaredRateLimit,
   NamedRateLimitData,
   ProbeRequestConfig,
   NoLimitClientOptions,
@@ -215,7 +215,7 @@ export default class RequestHandler {
     }requestHandler`;
     this.key = data.key;
     this.defaultClient = data.defaultClientOptions || {
-      rateLimit: { type: "noLimit" },
+      rateLimit: [{ type: "noLimit" }],
       name: "default",
     };
     this.logger = data.logger ?? noopLogger;

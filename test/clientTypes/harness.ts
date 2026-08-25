@@ -269,8 +269,8 @@ export async function startUpstream(delayMs = 0) {
 
 export interface ClientSpec {
   name: string;
-  /** An array declares several limits, which the multi-limit suite exercises. */
-  rateLimit: Record<string, unknown> | Record<string, unknown>[];
+  /** Always a list, as the public API takes it — one limit or several. */
+  rateLimit: Record<string, unknown>[];
   /** For a suite asserting what one attempt did, rather than what four did. */
   retryOptions?: Record<string, unknown>;
 }
@@ -392,7 +392,7 @@ export async function withReplicas(
     );
   }
   const shared = options.clients.find(
-    (c) => !Array.isArray(c.rateLimit) && c.rateLimit.type === "sharedLimit"
+    (c) => c.rateLimit.length === 1 && c.rateLimit[0].type === "sharedLimit"
   );
   if (shared) {
     throw new Error(

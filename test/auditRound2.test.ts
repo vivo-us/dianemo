@@ -209,7 +209,7 @@ async function withCustomHandler(
     templateName: string;
     keyPrefix: string;
     baseURL: string;
-    rateLimit: Record<string, unknown>;
+    rateLimit: Record<string, unknown>[];
     retryOptions?: Record<string, unknown>;
     requestOptions?: Record<string, unknown>;
   },
@@ -267,12 +267,14 @@ for (const harness of harnesses(9)) {
           [
             {
               name: "hol",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 10,
-                tokensToAdd: 10,
-                interval: 800,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 10,
+                  tokensToAdd: 10,
+                  interval: 800,
+                },
+              ],
             },
           ],
           async (handler) => {
@@ -330,12 +332,14 @@ for (const harness of harnesses(9)) {
             templateName: "wedge",
             keyPrefix: "r2wedge",
             baseURL: upstream.baseURL,
-            rateLimit: {
-              type: "requestLimit",
-              maxTokens: 10,
-              tokensToAdd: 10,
-              interval: 400,
-            },
+            rateLimit: [
+              {
+                type: "requestLimit",
+                maxTokens: 10,
+                tokensToAdd: 10,
+                interval: 400,
+              },
+            ],
             // The stranded request can never be admitted, so it has to be able
             // to give up inside the test rather than after the 60s default.
             requestOptions: { cleanupTimeout: 1500 },
@@ -362,12 +366,14 @@ for (const harness of harnesses(9)) {
               "r2wedge:requestHandler:rateLimitUpdated",
               JSON.stringify({
                 clientName: client,
-                rateLimit: {
-                  type: "requestLimit",
-                  maxTokens: 3,
-                  tokensToAdd: 3,
-                  interval: 400,
-                },
+                rateLimit: [
+                  {
+                    type: "requestLimit",
+                    maxTokens: 3,
+                    tokensToAdd: 3,
+                    interval: 400,
+                  },
+                ],
                 source: "operator",
                 publisherInstanceId: "someone-else",
               })
@@ -397,7 +403,7 @@ for (const harness of harnesses(9)) {
         await withHandler(
           harness,
           upstream.baseURL,
-          [{ name: "nl", rateLimit: { type: "noLimit" } }],
+          [{ name: "nl", rateLimit: [{ type: "noLimit" }] }],
           async (handler, backend) => {
             const client = "nl:_:a";
             const queueKey = `r2nl:requestHandler:${client}:queue`;
@@ -450,7 +456,7 @@ for (const harness of harnesses(9)) {
             templateName: "fz",
             keyPrefix: "r2fz",
             baseURL: upstream.baseURL,
-            rateLimit: { type: "noLimit" },
+            rateLimit: [{ type: "noLimit" }],
             retryOptions: { maxRetries: 0 },
           },
           async (handler, backend) => {
@@ -571,7 +577,7 @@ for (const harness of harnesses(9)) {
             templateName: "rh",
             keyPrefix: "r2rh",
             baseURL: upstream.baseURL,
-            rateLimit: { type: "noLimit" },
+            rateLimit: [{ type: "noLimit" }],
             retryOptions: {
               maxRetries: 1,
               retryStatusCodes: [],
@@ -668,7 +674,7 @@ for (const harness of harnesses(10)) {
         ((creds: { instanceId: string }) => [
           {
             name: `rt:_:${creds.instanceId}`,
-            rateLimit: { type: "noLimit" },
+            rateLimit: [{ type: "noLimit" }],
             requestOptions: {
               defaults: { baseURL: `http://127.0.0.1:${port}` },
             },
@@ -841,12 +847,14 @@ for (const harness of harnesses(11)) {
             templateName: "dip",
             keyPrefix: "r2dip",
             baseURL: upstream.baseURL,
-            rateLimit: {
-              type: "requestLimit",
-              maxTokens: 10,
-              tokensToAdd: 10,
-              interval: INTERVAL,
-            },
+            rateLimit: [
+              {
+                type: "requestLimit",
+                maxTokens: 10,
+                tokensToAdd: 10,
+                interval: INTERVAL,
+              },
+            ],
             requestOptions: { cleanupTimeout: 5000 },
           },
           async (handler, backend) => {
@@ -905,12 +913,14 @@ for (const harness of harnesses(11)) {
               "r2dip:requestHandler:rateLimitUpdated",
               JSON.stringify({
                 clientName,
-                rateLimit: {
-                  type: "requestLimit",
-                  maxTokens: 3,
-                  tokensToAdd: 3,
-                  interval: INTERVAL,
-                },
+                rateLimit: [
+                  {
+                    type: "requestLimit",
+                    maxTokens: 3,
+                    tokensToAdd: 3,
+                    interval: INTERVAL,
+                  },
+                ],
                 source: "dynamic",
                 publisherInstanceId: "someone-else",
               })

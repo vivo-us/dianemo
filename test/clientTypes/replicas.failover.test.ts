@@ -325,7 +325,7 @@ describe.skipIf(!HAS_REDIS)("multi-replica failover", () => {
           clients: [
             {
               name: "remote-done",
-              rateLimit: { type: "concurrencyLimit", maxConcurrency: 1 },
+              rateLimit: [{ type: "concurrencyLimit", maxConcurrency: 1 }],
             },
           ],
           redisDb: REDIS_DB,
@@ -369,7 +369,7 @@ describe.skipIf(!HAS_REDIS)("multi-replica failover", () => {
           clients: [
             {
               name: "fo1",
-              rateLimit: { type: "concurrencyLimit", maxConcurrency: 2 },
+              rateLimit: [{ type: "concurrencyLimit", maxConcurrency: 2 }],
             },
           ],
           redisDb: REDIS_DB,
@@ -450,12 +450,14 @@ describe.skipIf(!HAS_REDIS)("multi-replica failover", () => {
               // budget is large so that draining it takes long enough for the
               // kill below to land while the controller is still admitting.
               name: "fo2",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 200,
-                tokensToAdd: 200,
-                interval: 60_000,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 200,
+                  tokensToAdd: 200,
+                  interval: 60_000,
+                },
+              ],
             },
           ],
           redisDb: REDIS_DB,
@@ -525,12 +527,14 @@ describe.skipIf(!HAS_REDIS)("multi-replica failover", () => {
           clients: [
             {
               name: "fo3",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 4,
-                tokensToAdd: 4,
-                interval: 60_000,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 4,
+                  tokensToAdd: 4,
+                  interval: 60_000,
+                },
+              ],
             },
           ],
           redisDb: REDIS_DB,
@@ -582,7 +586,7 @@ describe.skipIf(!HAS_REDIS)("multi-replica failover", () => {
           clients: [
             {
               name: "fo4",
-              rateLimit: { type: "concurrencyLimit", maxConcurrency: 2 },
+              rateLimit: [{ type: "concurrencyLimit", maxConcurrency: 2 }],
             },
           ],
           redisDb: REDIS_DB,
@@ -632,12 +636,14 @@ describe.skipIf(!HAS_REDIS)("multi-replica failover", () => {
               // survival of the queue entry is measured while the budget is
               // still empty, and the request is then served on the refill.
               name: "fo5",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 1,
-                tokensToAdd: 1,
-                interval: 4000,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 1,
+                  tokensToAdd: 1,
+                  interval: 4000,
+                },
+              ],
             },
           ],
           redisDb: REDIS_DB,
@@ -724,12 +730,14 @@ describe.skipIf(!HAS_REDIS)("multi-replica failover", () => {
               // A refill soon enough that the controller admits the dead
               // owner's request during the test.
               name: "fo6",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 1,
-                tokensToAdd: 1,
-                interval: 1200,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 1,
+                  tokensToAdd: 1,
+                  interval: 1200,
+                },
+              ],
             },
           ],
           redisDb: REDIS_DB,
@@ -819,7 +827,7 @@ describe.skipIf(!HAS_REDIS)("multi-replica failover", () => {
               // One at a time, so "the survivor got the capacity" and "the cap
               // was not exceeded" are both single-request questions.
               name: "fo10",
-              rateLimit: { type: "concurrencyLimit", maxConcurrency: 1 },
+              rateLimit: [{ type: "concurrencyLimit", maxConcurrency: 1 }],
             },
           ],
           redisDb: REDIS_DB,
@@ -956,7 +964,7 @@ describe.skipIf(!HAS_REDIS)("multi-replica failover", () => {
               // One at a time, so a second open request at the upstream is
               // over-admission with nothing to argue about.
               name: "fo9",
-              rateLimit: { type: "concurrencyLimit", maxConcurrency: 1 },
+              rateLimit: [{ type: "concurrencyLimit", maxConcurrency: 1 }],
             },
           ],
           redisDb: REDIS_DB,
@@ -1036,7 +1044,7 @@ describe.skipIf(!HAS_REDIS)("multi-replica failover", () => {
           clients: [
             {
               name: "fo8",
-              rateLimit: { type: "concurrencyLimit", maxConcurrency: 2 },
+              rateLimit: [{ type: "concurrencyLimit", maxConcurrency: 2 }],
             },
           ],
           redisDb: REDIS_DB,
@@ -1112,12 +1120,14 @@ describe.skipIf(!HAS_REDIS)("multi-replica failover", () => {
           clients: [
             {
               name: "fo7",
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 1,
-                tokensToAdd: 1,
-                interval: 60_000,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 1,
+                  tokensToAdd: 1,
+                  interval: 60_000,
+                },
+              ],
             },
           ],
           redisDb: REDIS_DB,

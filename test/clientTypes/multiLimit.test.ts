@@ -313,7 +313,7 @@ describe.each(harnesses(4))("multiLimit — $name", (harness) => {
         { name: "own", rateLimit: [perSecond, perWindow] },
         {
           name: "bor",
-          rateLimit: { type: "sharedLimit", clientName: "own:_:a" },
+          rateLimit: [{ type: "sharedLimit", clientName: "own:_:a" }],
         },
       ],
       async (handler, backend) => {
@@ -424,10 +424,36 @@ describe("multiLimit configuration", () => {
   const rejects = (rateLimit: unknown, message: RegExp) =>
     expect(build([{ name: "c", rateLimit }])).rejects.toThrow(message);
 
-  it("refuses an entry with no name", async () => {
+  it("names an unnamed entry `default` rather than refusing it", async () => {
+    // A client with one limit never has to invent a name for it.
+    await build([
+      {
+        name: "c",
+        rateLimit: [
+          {
+            type: "requestLimit",
+            interval: 1000,
+            tokensToAdd: 1,
+            maxTokens: 1,
+          },
+        ],
+      },
+    ]);
+  }, 30_000);
+
+  it("refuses a second entry with no name", async () => {
+    // Both would take `default`, so both would meter against one bucket.
     await rejects(
-      [{ type: "requestLimit", interval: 1000, tokensToAdd: 1, maxTokens: 1 }],
-      /needs a name/
+      [
+        { type: "requestLimit", interval: 1000, tokensToAdd: 1, maxTokens: 1 },
+        {
+          type: "requestLimit",
+          interval: 60_000,
+          tokensToAdd: 5,
+          maxTokens: 5,
+        },
+      ],
+      /two rate limits without a name/
     );
   }, 30_000);
 
@@ -500,12 +526,14 @@ describe("multiLimit configuration", () => {
     await build([
       {
         name: "owner",
-        rateLimit: {
-          type: "requestLimit",
-          interval: 1000,
-          tokensToAdd: 1,
-          maxTokens: 1,
-        },
+        rateLimit: [
+          {
+            type: "requestLimit",
+            interval: 1000,
+            tokensToAdd: 1,
+            maxTokens: 1,
+          },
+        ],
       },
       {
         name: "c",

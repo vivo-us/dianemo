@@ -123,12 +123,14 @@ export async function registerAcmeTemplate(handler: RequestHandler) {
   await handler.registerClientTemplate("acme", (creds): CreateClientData[] => [
     {
       name: buildClientName("acme", creds),
-      rateLimit: {
-        type: "requestLimit",
-        interval: 1000,
-        tokensToAdd: 100,
-        maxTokens: 100,
-      },
+      rateLimit: [
+        {
+          type: "requestLimit",
+          interval: 1000,
+          tokensToAdd: 100,
+          maxTokens: 100,
+        },
+      ],
       requestOptions: { defaults: { baseURL: creds.baseUrl } },
       authentication: {
         type: "oauth2",
@@ -213,8 +215,9 @@ the template default with its record saying otherwise.
 
 Three more things worth knowing:
 
-- **A plan may be an array.** [Several limits](rate-limits/multiple-limits.md)
-  is exactly the shape a paid tier tends to take.
+- **A plan may hold several limits.**
+  [A per-second and a per-day cap](rate-limits/multiple-limits.md) is exactly the
+  shape a paid tier tends to take.
 - **Plans are validated at registration.** A plan whose budget can never hand out
   a token, or a `defaultRateLimitOption` naming a plan that is not declared,
   fails the deploy that introduced it rather than the first tenant who picks it.
@@ -248,8 +251,8 @@ await handler.registerClientTemplate(
   {
     rateLimitOptions: {
       standard: {
-        "": { type: "requestLimit", interval: 1000, tokensToAdd: 1, maxTokens: 1 },
-        orders: { type: "requestLimit", interval: 1000, tokensToAdd: 6, maxTokens: 6 },
+        "": [{ type: "requestLimit", interval: 1000, tokensToAdd: 1, maxTokens: 1 }],
+        orders: [{ type: "requestLimit", interval: 1000, tokensToAdd: 6, maxTokens: 6 }],
         reports: [
           { name: "per_second", type: "requestLimit", interval: 1000, tokensToAdd: 2, maxTokens: 2 },
           { name: "per_day", type: "requestLimit", interval: 86_400_000, tokensToAdd: 500, maxTokens: 500 },

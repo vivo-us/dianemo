@@ -1,8 +1,9 @@
 # Several limits on one client
 
-Many vendors publish more than one limit at once — 20 requests a second *and*
-50,000 a day, or 10 a second *and* no more than 3 in flight. Declare `rateLimit`
-as an array and a request is sent only when **every** entry can take it.
+`rateLimit` is always a list, and a request is sent only when **every** limit in
+it can take the request. Most clients have one; many vendors publish more than
+one at once — 20 requests a second *and* 50,000 a day, or 10 a second *and* no
+more than 3 in flight — and those go side by side in the same list.
 
 ```ts
 {
@@ -14,28 +15,28 @@ as an array and a request is sent only when **every** entry can take it.
 }
 ```
 
-A single limit is still written exactly as before, without a name. The array is
-only for clients that genuinely have more than one budget.
+One limit is the same list with one entry, and needs no name:
+
+```ts
+rateLimit: [{ type: "requestLimit", interval: 1000, tokensToAdd: 100, maxTokens: 100 }]
+```
 
 ## Names
 
-Every entry needs a `name`, matching `/^[a-z0-9_]{1,64}$/`, unique within the
-client. The name is not decoration: it is the key the entry's budget is stored
-under, `<client namespace>:rateLimit:per_day`. That is what makes reordering the
-array safe, and what makes the balances legible when you go looking in Redis.
+A limit's `name` is the key its budget is stored under —
+`<client namespace>:rateLimit:per_day` — which is what makes reordering the list
+safe and what makes the balances legible when you go looking in Redis. It must
+match `/^[a-z0-9_]{1,64}$/`: a colon, a space or a capital would resolve to a key
+that is ambiguous or needs escaping.
 
-Two entries sharing a name would be one bucket metering two limits, so it is a
-configuration error rather than a last-one-wins merge. So is an entry with no
-name, an empty array, and a name with a colon, a space or a capital in it — all
-three would otherwise resolve to a key that is ambiguous or needs escaping.
+**`name` may be omitted, where it is `default`.** A client with one limit
+therefore never has to invent one, and its budget lives at
+`<client namespace>:rateLimit:default`. Omit it twice and both limits take the
+same name and would meter against one bucket, so that is a configuration error
+rather than a last-one-wins merge — as is any other duplicate name, and an empty
+list.
 
-**A limit written in the single form is named `default`.** Internally there is
-one shape — an array of named limits — and a config declaring one limit is simply
-an array of one, so its budget lives at `<client namespace>:rateLimit:default`
-and `getClientStats` reports it under that name. Nothing about writing the single
-form changes; it is sugar for the array, normalised once when the client is built.
-
-> **Upgrading:** this moved. Budgets used to live at the un-suffixed
+> **Upgrading from 1.x:** budgets moved. They used to live at the un-suffixed
 > `<client namespace>:rateLimit`, and those keys are orphaned by the change. A
 > bucket that does not exist reads as **full**, so the first requests after the
 > upgrade meet a fresh budget and can burst up to `maxTokens` before the new key
@@ -43,7 +44,7 @@ form changes; it is sugar for the array, normalised once when the client is buil
 > acceptable, or clear the old keys and let the new ones start at their ceiling
 > deliberately.
 
-## What may go in the array
+## What may go in the list
 
 Any of the four types, in any combination:
 
@@ -87,7 +88,7 @@ always had.
 ## What the tightest limit decides
 
 - **The cost ceiling.** `cost` is measured against the smallest ceiling in the
-  array — the lowest `maxTokens` or `maxConcurrency`. A cost above it can never
+  list — the lowest `maxTokens` or `maxConcurrency`. A cost above it can never
   be admitted, so it is failed with `RequestCostExceedsBudgetError` rather than
   queued forever.
 - **The throughput.** Whichever budget runs out first is the one that holds the
@@ -114,7 +115,7 @@ A client with several budgets does not, and this is deliberate. The response doe
 not say *which* limit was breached, and zeroing a per-day bucket over a
 per-second breach would stand the client down until tomorrow. The freeze window
 is the stand-down instead: floored at the **shortest** refill interval in the
-array — the soonest anything here can hand out a token at all — and lengthened by
+list — the soonest anything here can hand out a token at all — and lengthened by
 each further 429, with recovery probed one request at a time as usual.
 
 The shortest, not the longest, for the same reason: flooring a freeze at a
@@ -126,7 +127,7 @@ A client that borrows another's budget declares `sharedLimit` and nothing else.
 Combining it with limits of its own is a configuration error.
 
 ```ts
-rateLimit: { type: "sharedLimit", clientName: "acme:_:production" }   // ✓
+rateLimit: [{ type: "sharedLimit", clientName: "acme:_:production" }]   // ✓
 rateLimit: [{ name: "contract", type: "sharedLimit", clientName: "…" }] // ✓ same client
 
 rateLimit: [
@@ -166,16 +167,16 @@ its budgets, atomically, whatever they are called:
 ]}
 
 // borrower — spends both of the owner's budgets
-{ name: "acme:_:sandbox", rateLimit: { type: "sharedLimit", clientName: "acme:_:production" } }
+{ name: "acme:_:sandbox", rateLimit: [{ type: "sharedLimit", clientName: "acme:_:production" }] }
 ```
 
 ## Dynamic updates
 
-`rateLimitChange` receives the client's limits and returns a replacement. Either
-shape is accepted and normalised on receipt, so a callback written against the
-single form keeps working. An update naming a `sharedLimit` is ignored: that
-would mean a different client class, and a broadcast cannot change which class a
-client is — the rebuild path is what swaps one for another.
+`rateLimitChange` receives the client's limits and returns a replacement list.
+Names may be omitted there exactly as they may in the original declaration. An
+update naming a `sharedLimit` is ignored: that would be a different kind of
+client, and a broadcast cannot change which kind a client is — the rebuild path
+is what swaps one for another.
 
 An update whose entries are unusable is refused and logged, keeping the last
 workable configuration rather than wedging the client.

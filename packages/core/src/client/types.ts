@@ -59,12 +59,15 @@ export interface BasicCredentials extends BaseCredentialsData {
 }
 
 export type RateLimitChange<
-  R extends RateLimitConfig = RateLimitConfig,
-  N extends RateLimitConfig = R,
+  R extends RateLimitData = RateLimitData,
+  N extends RateLimitData = R,
 > = (
-  oldRateLimit: R,
+  oldRateLimit: (R & { name: string })[],
   response: AxiosResponse
-) => Promise<N | undefined> | N | undefined;
+) =>
+  | Promise<DeclaredRateLimit<N>[] | undefined>
+  | DeclaredRateLimit<N>[]
+  | undefined;
 
 export interface ClientConstructorData {
   client: CreateClientData;
@@ -89,7 +92,7 @@ export interface ProbeRequestConfig {
   intervalMs: number;
 }
 
-export interface CreateClientData<R extends RateLimitConfig = RateLimitConfig> {
+export interface CreateClientData<R extends RateLimitData = RateLimitData> {
   name: string;
   /**
    * Which client's credential entry this one uses. Set internally when a
@@ -100,26 +103,25 @@ export interface CreateClientData<R extends RateLimitConfig = RateLimitConfig> {
    */
   authOwnerName?: string;
   /**
-   * The Rate Limit info for the Client. Defaults to `noLimit`.
+   * Every limit this client is metered against. Defaults to `noLimit`.
    *
-   * An array declares several limits that must **all** admit a request before it
-   * is sent — a per-second and a per-day cap, say. Every entry needs a `name`.
-   * See docs/rate-limits/multiple-limits.md.
+   * Always a list, even for one limit: a request is sent only when **all** of
+   * them admit it, so a per-second and a per-day cap live side by side here.
+   * `name` keys each limit's budget and may be omitted once per client, where it
+   * is `"default"`. See docs/rate-limits/multiple-limits.md.
    */
-  rateLimit?: R;
+  rateLimit?: DeclaredRateLimit<R>[];
   /**
    * Computes a dynamic budget update. Shared clients receive their shared-limit
    * descriptor but update the concrete budget owned by their parent.
    */
   rateLimitChange?: RateLimitChange<
     R,
-    [RateLimitConfig] extends [R]
-      ? RateLimitConfig
-      : R extends readonly NamedRateLimitData[]
-        ? NamedRateLimitData[]
-        : R extends SharedLimitClientOptions
-          ? Exclude<RateLimitData, SharedLimitClientOptions>
-          : R
+    [RateLimitData] extends [R]
+      ? RateLimitData
+      : R extends SharedLimitClientOptions
+        ? Exclude<RateLimitData, SharedLimitClientOptions>
+        : R
   >;
   requestOptions?: RequestOptions;
   retryOptions?: Partial<RetryOptions>;
@@ -143,12 +145,11 @@ export interface CreateClientData<R extends RateLimitConfig = RateLimitConfig> {
 export interface RateLimitUpdatedData {
   clientName: string;
   /**
-   * Dianemo publishes this normalised, so a listener sees one shape whichever
-   * shape the change was written in. Typed as the declared shape because a
-   * receiver also has to accept what an operator or an older replica sends, and
-   * every `handleRateLimitUpdated` normalises again on receipt.
+   * Published with every name resolved. Typed as the declared shape because a
+   * receiver also has to accept what an operator sends, and every
+   * `handleRateLimitUpdated` resolves names again on receipt.
    */
-  rateLimit: RateLimitConfig;
+  rateLimit: DeclaredRateLimit[];
   /**
    * `init` at construction, `operator` for an admin update, `dynamic` from a
    * `rateLimitChange` callback. A listener that persists changes filters on this.
@@ -170,17 +171,25 @@ export type RateLimitData =
   | SharedLimitClientOptions;
 
 /**
- * One entry of a multi-limit array: any rate limit, plus the `name` its budget
- * is keyed under. Names must match `/^[a-z0-9_]{1,64}$/` and be unique within
- * the client, because they become backend key segments.
+ * One limit as a caller writes it.
+ *
+ * `name` keys the limit's budget — `<client namespace>:rateLimit:<name>` — and is
+ * what makes reordering the list safe. It may be omitted, where it is
+ * `"default"`, so a client with one limit never has to invent one; a second
+ * unnamed limit is refused, since both would meter against one bucket.
  */
-export type NamedRateLimitData = RateLimitData & { name: string };
+export type DeclaredRateLimit<R extends RateLimitData = RateLimitData> = R & {
+  name?: string;
+};
 
 /**
- * What a client declares as its `rateLimit`: one limit, or several that must all
- * admit before a request is sent. See docs/rate-limits/multiple-limits.md.
+ * One limit once its name has been resolved. This is the shape everything past
+ * `createClient` works in — there is no second shape to branch on.
+ *
+ * Names must match `/^[a-z0-9_]{1,64}$/` and be unique within the client,
+ * because they become backend key segments.
  */
-export type RateLimitConfig = RateLimitData | NamedRateLimitData[];
+export type NamedRateLimitData = RateLimitData & { name: string };
 
 export interface NoLimitClientOptions {
   type: "noLimit";

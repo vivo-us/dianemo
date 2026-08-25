@@ -6,7 +6,7 @@ import type BaseClient from "../client/index.js";
 import type RequestHandler from "../index.js";
 import type {
   CreateClientData,
-  RateLimitConfig,
+  DeclaredRateLimit,
   SharedLimitClientOptions,
 } from "../client/types.js";
 
@@ -224,19 +224,31 @@ export async function createClient(
   // is worse still — the merge spread overwrites the parent's limit with it, so
   // `rateLimit: row.limit ?? undefined` would drop an inherited cap rather than
   // inherit it. Normalising either with `??` silently removes a cap.
-  const declared = "rateLimit" in data ? data.rateLimit : { type: "noLimit" };
+  const declared = "rateLimit" in data ? data.rateLimit : [{ type: "noLimit" }];
   if (declared === null || declared === undefined) {
     throw new ConfigurationError(
       "unknown_rate_limit_type",
       `Client "${data.name}" declares rateLimit as ${JSON.stringify(
         declared ?? null
-      )}. Omit the property entirely for the noLimit default, or name a type: requestLimit, concurrencyLimit, sharedLimit, noLimit.`
+      )}. Omit the property entirely for the noLimit default, or give a list of limits.`
     );
   }
-  const rateLimit = declared as RateLimitConfig;
+  // A list, or nothing. Types cover hand-written config, but a template builder is
+  // routinely fed database rows and an override comes back from the backend as
+  // untyped JSON — so a bare limit object reaches here at runtime from code
+  // written against the shape this used to accept, and would otherwise fail deep
+  // inside normalisation with a message naming neither the client nor the fix.
+  if (!Array.isArray(declared)) {
+    throw new ConfigurationError(
+      "unknown_rate_limit_type",
+      `Client "${data.name}" declares rateLimit as a single limit. It takes a list, so wrap it: rateLimit: [${JSON.stringify(
+        declared
+      )}].`
+    );
+  }
+  const rateLimit = declared as DeclaredRateLimit[];
 
-  // Normalised once, here, so nothing past this point has to ask which of the two
-  // declared shapes it was handed.
+  // Normalised once, here, so nothing past this point deals in an unnamed limit.
   const limits = normalizeRateLimit(rateLimit);
 
   if (!isSharedLimitOnly(limits)) {

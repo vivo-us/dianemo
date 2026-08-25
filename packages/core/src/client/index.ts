@@ -361,7 +361,7 @@ abstract class BaseClient {
    * update local state.
    */
   protected async updateRateLimit(
-    data: ClientTypes.RateLimitConfig,
+    data: ClientTypes.DeclaredRateLimit[],
     source: ClientTypes.RateLimitUpdatedData["source"] = "operator"
   ) {
     const updatedData: ClientTypes.RateLimitUpdatedData = {

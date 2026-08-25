@@ -243,7 +243,7 @@ for (const harness of harnesses(7)) {
           [
             {
               name: "wedge",
-              rateLimit: { type: "concurrencyLimit", maxConcurrency: 1 },
+              rateLimit: [{ type: "concurrencyLimit", maxConcurrency: 1 }],
             },
           ],
           async (handler) => {
@@ -292,7 +292,7 @@ for (const harness of harnesses(7)) {
           [
             {
               name: "cost",
-              rateLimit: { type: "concurrencyLimit", maxConcurrency: 2 },
+              rateLimit: [{ type: "concurrencyLimit", maxConcurrency: 2 }],
             },
           ],
           async (handler) => {
@@ -332,10 +332,12 @@ for (const harness of harnesses(7)) {
             [
               {
                 name: "nan",
-                rateLimit: {
-                  type: "concurrencyLimit",
-                  maxConcurrency: Number("not-a-number"),
-                },
+                rateLimit: [
+                  {
+                    type: "concurrencyLimit",
+                    maxConcurrency: Number("not-a-number"),
+                  },
+                ],
               },
             ],
             async () => {}
@@ -367,12 +369,14 @@ for (const harness of harnesses(7)) {
           ((creds: { instanceId: string }) => [
             {
               name: `d:_:${creds.instanceId}`,
-              rateLimit: {
-                type: "requestLimit",
-                maxTokens: 2,
-                tokensToAdd: 2,
-                interval: 300,
-              },
+              rateLimit: [
+                {
+                  type: "requestLimit",
+                  maxTokens: 2,
+                  tokensToAdd: 2,
+                  interval: 300,
+                },
+              ],
               requestOptions: { defaults: { baseURL: upstream.baseURL } },
             },
           ]) as never
@@ -433,7 +437,7 @@ for (const harness of harnesses(7)) {
           ((creds: { instanceId: string }) => [
             {
               name: `r:_:${creds.instanceId}`,
-              rateLimit: { type: "concurrencyLimit", maxConcurrency: 1 },
+              rateLimit: [{ type: "concurrencyLimit", maxConcurrency: 1 }],
               requestOptions: { defaults: { baseURL: upstream.baseURL } },
             },
           ]) as never

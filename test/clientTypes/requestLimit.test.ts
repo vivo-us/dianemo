@@ -31,7 +31,7 @@ describe.each(harnesses(5))("requestLimit — $name", (harness) => {
     withHandler(
       harness,
       upstream.baseURL,
-      [{ name: "rl", rateLimit: { type: "requestLimit", ...rateLimit } }],
+      [{ name: "rl", rateLimit: [{ type: "requestLimit", ...rateLimit }] }],
       fn
     );
 
