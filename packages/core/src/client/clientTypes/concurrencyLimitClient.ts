@@ -1,5 +1,6 @@
 import type { RequestDoneData, RequestMetadata } from "../../request/types.js";
-import { ConfigurationError } from "../../errors.js";
+import { assertUsableConcurrency } from "../../utils/rateLimit.js";
+import type { MultiLimitSpec } from "../../backend/types.js";
 import BaseClient from "../index.js";
 import type {
   ClientConstructorData,
@@ -32,6 +33,9 @@ class ConcurrencyLimitClient extends BaseClient {
   }
 
   public handleRateLimitUpdated(data: RateLimitUpdatedData) {
+    // An array would mean a different client class, which a broadcast cannot
+    // change; the rebuild path is what swaps one client for another.
+    if (Array.isArray(data.rateLimit)) return;
     if (data.rateLimit.type !== "concurrencyLimit") return;
     // Keep the last workable value rather than applying a broken one.
     try {
@@ -175,24 +179,28 @@ class ConcurrencyLimitClient extends BaseClient {
     );
   }
 
-  private getSlotId(request: Pick<RequestMetadata, "requestId" | "retries">) {
-    return request.retries === 0
-      ? request.requestId
-      : `${request.requestId}:retry:${request.retries}`;
+  /** One slot ledger, so a client sharing this budget claims from the same set. */
+  public getLimitSpecs(
+    grantId: string | undefined,
+    slotId: string
+  ): MultiLimitSpec[] {
+    return [
+      {
+        kind: "concurrency",
+        key: this.getConcurrencyKey(grantId),
+        config: {
+          maxConcurrency: this.rateLimit.maxConcurrency,
+          requestTtl: this.requestTtl,
+        },
+        slotId,
+      },
+    ];
   }
 
-  /** Grant-isolated clients track slots per grant. */
-  private getConcurrencyKey(grantId?: string): string {
-    const baseKey = `${this.namespace}:concurrency`;
-
-    if (!grantId) return baseKey;
-
-    if (this.usesGrantIsolation()) {
-      this.knownGrantIds.add(grantId);
-      return `${this.namespace}:grant:${grantId}:concurrency`;
-    }
-
-    return baseKey;
+  /** Records the grant on the way past, so `destroy` knows what it touched. */
+  protected getConcurrencyKey(grantId?: string): string {
+    if (grantId && this.usesGrantIsolation()) this.knownGrantIds.add(grantId);
+    return super.getConcurrencyKey(grantId);
   }
 
   /**
@@ -211,27 +219,6 @@ class ConcurrencyLimitClient extends BaseClient {
 
   /** Grants this client has actually claimed a slot for, so destroy can clean up. */
   private knownGrantIds = new Set<string>();
-}
-
-/**
- * Rejects a concurrency ceiling that cannot admit anything.
- *
- * `NaN` is the dangerous value: `used + cost <= NaN` is false in JavaScript,
- * which removes the cap, and nil-ish in Lua, which refuses everything. The usual
- * source is a `rateLimitChange` reading a header that was absent once.
- */
-function assertUsableConcurrency(
-  rateLimit: ConcurrencyLimitClientOptions,
-  clientName: string
-): void {
-  const { maxConcurrency } = rateLimit;
-  if (Number.isFinite(maxConcurrency) && maxConcurrency > 0) return;
-  throw new ConfigurationError(
-    "invalid_rate_limit",
-    `Client "${clientName}" has an unusable concurrencyLimit: maxConcurrency must be a finite number greater than 0. Received ${JSON.stringify(
-      maxConcurrency
-    )}.`
-  );
 }
 
 export default ConcurrencyLimitClient;

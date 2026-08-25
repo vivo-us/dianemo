@@ -11,6 +11,16 @@ export interface Ctx {
   readonly redis: Redis;
   /** Invokes a registered Lua script by its custom-command name. */
   run(name: ScriptName, ...args: unknown[]): Promise<unknown>;
+  /**
+   * Invokes one of the scripts registered without a fixed key count. `keys` goes
+   * on the wire ahead of everything else, which is how ioredis learns where KEYS
+   * ends and ARGV begins for these.
+   */
+  runVariadic(
+    name: ScriptName,
+    keys: string[],
+    ...args: unknown[]
+  ): Promise<unknown>;
   /** Redis's clock in epoch milliseconds. */
   now(): Promise<number>;
 }
@@ -27,7 +37,9 @@ function defineCommands(redis: Redis): void {
   for (const [name, { keys, lua }] of Object.entries(SCRIPTS)) {
     // Skip if a sibling backend on the same connection already defined it.
     if ((redis as unknown as Record<string, unknown>)[name]) continue;
-    redis.defineCommand(name, { numberOfKeys: keys, lua });
+    // Omitting `numberOfKeys` is what makes ioredis read it from the call site.
+    if (keys === "variadic") redis.defineCommand(name, { lua });
+    else redis.defineCommand(name, { numberOfKeys: keys, lua });
   }
 }
 
@@ -49,6 +61,10 @@ export function createContext(redis: Redis): Ctx {
         );
       }
       return (fn as (...a: unknown[]) => Promise<unknown>).apply(redis, args);
+    },
+
+    runVariadic(name, keys, ...args) {
+      return this.run(name, keys.length, ...keys, ...args);
     },
 
     async now() {

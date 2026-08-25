@@ -325,6 +325,75 @@ matters for anything routing by key: Redis Cluster, a proxy, an active-active
 deployment. **Dianemo supports a single logical keyspace only**, which is why no
 Cluster adapter exists and `redisBackend` types its parameter as `Redis`.
 
+## Several budgets are claimed in one operation, or not at all
+
+A client can declare an array of rate limits, and a request must claim every one
+of them. Claiming them in turn would leave the first spent whenever the second
+declined — and no decline path hands a budget back, so a per-day cap sitting on
+top of a per-second one would leak a token on every refusal, permanently, at
+exactly the rate the tighter limit refuses.
+
+So the claim is one backend operation. Both implementations evaluate every budget
+before committing to any: the memory backend in a single synchronous pass, Redis
+in a single Lua script that runs `planMultiLimit` to completion before
+`commitMultiLimit` writes anything.
+
+Three consequences worth knowing before touching that code:
+
+- **`acquireMultiLimit`, `releaseMultiLimit` and `tryAdmitMultiLimit` are
+  optional on `DianemoBackend`**, so a backend written against an earlier version
+  still satisfies the interface — but a client declaring several limits refuses
+  to construct without them, rather than degrading to one budget at a time.
+- **They are the only scripts registered without a fixed key count**, because the
+  key list comes from a client's configuration. `ctx.runVariadic` passes the count
+  as the call's first argument, which shifts every other position by one; the
+  static guards in `test/luaScripts.test.ts` know about this and hold those three
+  to the ARGV contract and to addressing `KEYS` dynamically. Every key is still
+  declared in `KEYS` — routing them through `ARGV` would work on a single node
+  and hide the problem from anything that routes by key.
+- **Refill credit is persisted even on refusal.** The intervals really did elapse,
+  and the single-budget paths write it back too, so a plan that is thrown away
+  still commits what it read.
+
+## A multi-limit freeze does not empty the buckets
+
+A single `requestLimit` client zeroes its bucket on a 429: the response is proof
+that the bucket's picture of the vendor was wrong.
+
+A client with several budgets does not, and the difference is deliberate. The
+response does not say which limit was breached, so zeroing every bucket would
+destroy a per-day quota over a per-second refusal. Zeroing only the shortest adds
+nothing the freeze does not already do, since the freeze is floored at that same
+interval. So the freeze window is the whole stand-down: floored at the
+**shortest** refill interval in the array, lengthened by each further 429 through
+the same retry multiplier, and probed one request at a time.
+
+Flooring at the shortest rather than the longest is the other half of the same
+argument — a per-day interval would pause the fleet until tomorrow.
+
+## One queue per budget, so one arbiter orders it
+
+A `sharedLimit` client is constructed with the owner's name. Its queue, bucket,
+freeze state, metadata prefix and channels are all the owner's, which is the
+entire mechanism: the owner's controller drains one queue, and `priority` and
+arrival order therefore mean something across every client on that budget.
+
+That is why a `sharedLimit` may not be combined with other limits. A client with
+budgets of its own cannot adopt the owner's namespace — its own bucket would land
+in the owner's keyspace, metering the owner against a limit it never declared — so
+it would need a second queue. Two queues on one balance stays *correct*, since
+`acquireMultiLimit` is atomic and the budget is never oversold, but nothing
+arbitrates between them: priority stops carrying across, and a queue of cheap work
+takes each token as it refills while a costly head next door never accumulates
+enough. Restoring fair ordering would mean one controller draining several queues
+and choosing between their heads by score — a budget-group concept in election,
+plus a peek-and-claim across queues. That is a real design, and it was rejected
+for now in favour of not offering the combination at all.
+
+The reverse causes no trouble and is allowed: a `sharedLimit` client may point at
+an owner that declares several limits. It claims nothing itself, so the owner's
+controller does the claiming, of all the owner's budgets at once.
+
 ## Absent state reads as permissive
 
 Both backends read a missing key as the permissive answer. A token bucket with

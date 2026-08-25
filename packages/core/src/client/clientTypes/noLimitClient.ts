@@ -15,6 +15,9 @@ class NoLimitClient extends BaseClient {
   }
 
   public handleRateLimitUpdated(data: RateLimitUpdatedData) {
+    // An array would mean a different client class, which a broadcast cannot
+    // change; the rebuild path is what swaps one client for another.
+    if (Array.isArray(data.rateLimit)) return;
     if (data.rateLimit.type !== "noLimit") return;
     this.rateLimit = data.rateLimit;
   }

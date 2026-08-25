@@ -1,6 +1,7 @@
 import { createContext, type Ctx } from "./context.js";
 import { concurrencyOps } from "./ops/concurrency.js";
 import { tokenBucketOps } from "./ops/tokenBucket.js";
+import { multiLimitOps } from "./ops/multiLimit.js";
 import { normalizeTtlSeconds } from "@dianemo/core";
 import { instanceOps } from "./ops/instances.js";
 import { freezeOps } from "./ops/freeze.js";
@@ -58,6 +59,7 @@ class RedisBackend implements DianemoBackend {
   private subscribed = new Map<string, Set<MessageHandler>>();
   private ops: {
     tokenBucket: ReturnType<typeof tokenBucketOps>;
+    multiLimit: ReturnType<typeof multiLimitOps>;
     concurrency: ReturnType<typeof concurrencyOps>;
     queue: ReturnType<typeof queueOps>;
     freeze: ReturnType<typeof freezeOps>;
@@ -69,6 +71,7 @@ class RedisBackend implements DianemoBackend {
     this.ctx = createContext(redis);
     this.ops = {
       tokenBucket: tokenBucketOps(this.ctx),
+      multiLimit: multiLimitOps(this.ctx),
       concurrency: concurrencyOps(this.ctx),
       queue: queueOps(this.ctx),
       freeze: freezeOps(this.ctx),
@@ -293,6 +296,24 @@ class RedisBackend implements DianemoBackend {
   // `undefined`. Same for acquireQueuedConcurrency.
   refundTokens(...a: Parameters<NonNullable<DianemoBackend["refundTokens"]>>) {
     return this.ops.tokenBucket.refundTokens(...a);
+  }
+
+  // -------------------------------------------------------- several budgets
+
+  acquireMultiLimit(
+    ...a: Parameters<NonNullable<DianemoBackend["acquireMultiLimit"]>>
+  ) {
+    return this.ops.multiLimit.acquireMultiLimit(...a);
+  }
+  releaseMultiLimit(
+    ...a: Parameters<NonNullable<DianemoBackend["releaseMultiLimit"]>>
+  ) {
+    return this.ops.multiLimit.releaseMultiLimit(...a);
+  }
+  tryAdmitMultiLimit(
+    ...a: Parameters<NonNullable<DianemoBackend["tryAdmitMultiLimit"]>>
+  ) {
+    return this.ops.multiLimit.tryAdmitMultiLimit(...a);
   }
 
   // ---------------------------------------------------------- concurrency

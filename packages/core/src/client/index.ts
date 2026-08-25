@@ -1,9 +1,9 @@
 import type { RequestDoneData, RequestMetadata } from "../request/types.js";
 import { ClientUnavailableError, NotOAuth2ClientError } from "../errors.js";
-import type { DianemoBackend, FreezeState } from "../backend/types.js";
 import { REQUEST_TOMBSTONE_TTL_SECONDS } from "../backend/ttl.js";
 import processRequests from "./methods/processRequests.js";
 import type { QueuedRequest } from "../backend/types.js";
+import { costCeilingFor } from "../utils/rateLimit.js";
 import handleRequest from "./methods/handleRequest.js";
 import { encrypt } from "../utils/encryption.js";
 import type * as ClientTypes from "./types.js";
@@ -15,6 +15,11 @@ import {
   credentialTtlSeconds,
   DEFAULT_REFRESH_TOKEN_TTL_SECONDS,
 } from "../utils/credentialTtl.js";
+import type {
+  DianemoBackend,
+  FreezeState,
+  MultiLimitSpec,
+} from "../backend/types.js";
 
 /**
  * Shortest base duration for a client-wide freeze, used when the configured
@@ -55,7 +60,7 @@ abstract class BaseClient {
   protected authNamespace: string;
   protected emitter: NodeJS.EventEmitter;
   protected logger: Logger;
-  protected abstract rateLimit: ClientTypes.RateLimitData;
+  protected abstract rateLimit: ClientTypes.RateLimitConfig;
   protected metadata?: { [key: string]: unknown };
   protected requestOptions: ClientTypes.RequestOptions;
   protected authData?: ClientTypes.AuthCreateData;
@@ -327,6 +332,14 @@ abstract class BaseClient {
     return `${this.getMetadataKeyPrefix()}:${requestId}`;
   }
 
+  /** Grant-isolated clients track slots per grant. */
+  protected getConcurrencyKey(grantId?: string): string {
+    const baseKey = `${this.namespace}:concurrency`;
+    if (!grantId) return baseKey;
+    if (!this.usesGrantIsolation()) return baseKey;
+    return `${this.namespace}:grant:${grantId}:concurrency`;
+  }
+
   /** Grant-isolated clients freeze each grant independently. */
   protected getFreezeStateKey(grantId?: string): string {
     const baseKey = `${this.namespace}:freezeState`;
@@ -349,7 +362,7 @@ abstract class BaseClient {
    * update local state.
    */
   protected async updateRateLimit(
-    data: ClientTypes.RateLimitData,
+    data: ClientTypes.RateLimitConfig,
     source: ClientTypes.RateLimitUpdatedData["source"] = "operator"
   ) {
     const updatedData: ClientTypes.RateLimitUpdatedData = {
@@ -695,7 +708,7 @@ abstract class BaseClient {
     return this.role;
   }
 
-  public getRateLimit() {
+  public getRateLimit(): ClientTypes.RateLimitConfig {
     return this.rateLimit;
   }
 
@@ -798,25 +811,40 @@ abstract class BaseClient {
   /**
    * The largest `cost` this client could ever admit, or undefined when it has no
    * ceiling. A `sharedLimit` client answers for its parent, whose budget it
-   * spends; `noLimit` has none.
+   * spends; `noLimit` has none, and several limits are bounded by the tightest.
    */
   protected getCostCeiling(): number | undefined {
-    const limit = this.rateLimit;
-    if (limit.type === "requestLimit") return limit.maxTokens;
-    if (limit.type === "concurrencyLimit") return limit.maxConcurrency;
-    if (limit.type === "sharedLimit") {
-      const parent = this.getParentRateLimit?.();
-      if (parent?.type === "requestLimit") return parent.maxTokens;
-      if (parent?.type === "concurrencyLimit") return parent.maxConcurrency;
-    }
-    return undefined;
+    return costCeilingFor(this.rateLimit, () => this.getParentRateLimit?.());
   }
 
   /**
    * Resolves the rate limit this client draws on, for a `sharedLimit` child.
    * Injected by `createClients`, which is where the client registry lives.
    */
-  public getParentRateLimit?: () => ClientTypes.RateLimitData | undefined;
+  public getParentRateLimit?: () => ClientTypes.RateLimitConfig | undefined;
+
+  /**
+   * The budgets a request must claim here, in the form the backend takes them.
+   * Empty for a client with nothing to meter against.
+   */
+  public getLimitSpecs(
+    _grantId: string | undefined,
+    _slotId: string
+  ): MultiLimitSpec[] {
+    return [];
+  }
+
+  /**
+   * Member id a request's capacity is recorded under. Each attempt claims and
+   * releases its own, so a retry cannot release the slot its predecessor holds.
+   */
+  protected getSlotId(
+    request: Pick<RequestMetadata, "requestId" | "retries">
+  ): string {
+    return request.retries === 0
+      ? request.requestId
+      : `${request.requestId}:retry:${request.retries}`;
+  }
 
   /**
    * Re-runs role election. Injected by the handler, which owns the instance
@@ -1317,6 +1345,16 @@ abstract class BaseClient {
    * Whether the client is frozen right now. Unlike `canProcessNextRequest` this
    * claims nothing, so it is safe to call repeatedly from inside a wait loop.
    */
+  /** Public view of {@link getFreezeStateKey}, for a client spending this budget. */
+  public getFreezeStateKeyFor(grantId?: string): string {
+    return this.getFreezeStateKey(grantId);
+  }
+
+  /** Public view of {@link isFrozen}, for a client spending this one's budget. */
+  public async isBudgetFrozen(grantId?: string): Promise<boolean> {
+    return this.isFrozen(grantId);
+  }
+
   protected async isFrozen(grantId?: string): Promise<boolean> {
     const { canProcess } = await this.backend.canProcessRequest(
       this.getFreezeStateKey(grantId)

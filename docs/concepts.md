@@ -153,22 +153,31 @@ keyed by sub-client path:
 
 ```ts
 await handler.addTemplateClient("acme", credentials, {
-  "": { type: "requestLimit", interval: 1000, tokensToAdd: 50, maxTokens: 50 },
-  bulk: {
-    type: "requestLimit",
-    interval: 60_000,
-    tokensToAdd: 5,
-    maxTokens: 5,
+  rateLimitOverrides: {
+    "": { type: "requestLimit", interval: 1000, tokensToAdd: 50, maxTokens: 50 },
+    bulk: {
+      type: "requestLimit",
+      interval: 60_000,
+      tokensToAdd: 5,
+      maxTokens: 5,
+    },
   },
 });
 ```
 
-`""` targets the parent; a named path targets that sub-client.
+`""` targets the parent; a named path targets that sub-client. A bare record of
+paths is still accepted in that argument, as it was before this grew a wrapper.
 
-**An override must keep the same `type` as the template default.** The merge
-swaps fields within the discriminant, so moving from `requestLimit` to
-`concurrencyLimit` would change which client class is constructed. That is not
-supported, and is a configuration error rather than a silent no-op.
+**An override must keep the shape of the template default** — the same `type`,
+or an array where the default is an [array](rate-limits/multiple-limits.md). The
+merge swaps fields within the discriminant, so moving from `requestLimit` to
+`concurrencyLimit`, or from one limit to several, would change which client class
+is constructed. Either is skipped with a warning rather than applied.
+
+This is the operator-side escape hatch and needs no permission from the template.
+For a choice the plugin itself sanctions — a subscription plan, picked from a
+list the plugin wrote — see
+[letting callers pick a plan](writing-plugins.md#letting-callers-pick-a-plan).
 
 ## Instances, controllers and leader election
 

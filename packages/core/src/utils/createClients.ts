@@ -1,11 +1,13 @@
 import ConcurrencyLimitClient from "../client/clientTypes/concurrencyLimitClient.js";
 import RequestLimitClient from "../client/clientTypes/requestLimitClient.js";
 import SharedLimitClient from "../client/clientTypes/sharedLimitClient.js";
-import type { CreateClientData, RateLimitData } from "../client/types.js";
+import MultiLimitClient from "../client/clientTypes/multiLimitClient.js";
 import { ClientConflictError, ConfigurationError } from "../errors.js";
+import { isMultiRateLimit, isSharedLimitOnly } from "./rateLimit.js";
 import NoLimitClient from "../client/clientTypes/noLimitClient.js";
 import type BaseClient from "../client/index.js";
 import type RequestHandler from "../index.js";
+import type { CreateClientData, RateLimitConfig } from "../client/types.js";
 
 /**
  * Recursively collects all client names that a list of CreateClientData will produce,
@@ -230,17 +232,30 @@ export async function createClient(
       )}. Omit the property entirely for the noLimit default, or name a type: requestLimit, concurrencyLimit, sharedLimit, noLimit.`
     );
   }
-  const rateLimit = declared as RateLimitData;
+  const rateLimit = declared as RateLimitConfig;
 
-  switch (rateLimit.type) {
+  // A lone `sharedLimit` is the same client either way it is written, so the
+  // array form is unwrapped rather than given a second implementation. Combining
+  // one with other limits is refused by `assertUsableRateLimits`.
+  const declaredLimits = isMultiRateLimit(rateLimit) ? rateLimit : [rateLimit];
+  if (isMultiRateLimit(rateLimit) && !isSharedLimitOnly(rateLimit)) {
+    const mlClient = new MultiLimitClient(baseData, rateLimit);
+    this.clients.set(data.name, attachReconcile(mlClient));
+    await mlClient.init();
+    this.emitter.emit(`clientRegistered:${data.name}`);
+    return;
+  }
+  const soleLimit = declaredLimits[0];
+
+  switch (soleLimit.type) {
     case "requestLimit": {
-      const rlClient = new RequestLimitClient(baseData, rateLimit);
+      const rlClient = new RequestLimitClient(baseData, soleLimit);
       this.clients.set(data.name, attachReconcile(rlClient));
       await rlClient.init();
       break;
     }
     case "concurrencyLimit": {
-      const clClient = new ConcurrencyLimitClient(baseData, rateLimit);
+      const clClient = new ConcurrencyLimitClient(baseData, soleLimit);
       this.clients.set(data.name, attachReconcile(clClient));
       await clClient.init();
       break;
@@ -249,7 +264,7 @@ export async function createClient(
       // A child whose parent does not exist is forced to `worker` by the
       // election and so is never drained by anyone: it accepts requests, sends
       // none, and grows its queue by one permanent entry per request.
-      const parentName = rateLimit.clientName;
+      const parentName = soleLimit.clientName;
       const parent = this.clients.get(parentName);
       if (!parent) {
         throw new ConfigurationError(
@@ -257,13 +272,17 @@ export async function createClient(
           `Client "${data.name}" shares the rate limit of "${parentName}", which is not registered. Register the parent client first — a sharedLimit client cannot draw on a budget that does not exist.`
         );
       }
-      if (parent.getRateLimit().type === "sharedLimit") {
+      // A multi-limit owner is fine: this client takes the owner's queue as its
+      // own, so the owner's controller is what claims the budgets — all of them,
+      // however many the owner declares.
+      const parentLimit = parent.getRateLimit();
+      if (isSharedLimitOnly(parentLimit)) {
         throw new ConfigurationError(
           "shared_limit_parent_is_shared",
           `Client "${data.name}" shares the rate limit of "${parentName}", which is itself a sharedLimit client. Point it at the client that owns the budget.`
         );
       }
-      const slClient = new SharedLimitClient(baseData, rateLimit);
+      const slClient = new SharedLimitClient(baseData, soleLimit);
       // So the child can reject an oversized cost against its parent's ceiling.
       slClient.getParentRateLimit = () =>
         this.clients.get(parentName)?.getRateLimit();
@@ -279,7 +298,7 @@ export async function createClient(
       break;
     }
     case "noLimit": {
-      const nlClient = new NoLimitClient(baseData, rateLimit);
+      const nlClient = new NoLimitClient(baseData, soleLimit);
       this.clients.set(data.name, attachReconcile(nlClient));
       await nlClient.init();
       break;
@@ -293,7 +312,7 @@ export async function createClient(
       throw new ConfigurationError(
         "unknown_rate_limit_type",
         `Client "${data.name}" has an unrecognised rateLimit.type ${JSON.stringify(
-          (rateLimit as { type?: unknown }).type
+          (soleLimit as { type?: unknown }).type
         )}. Expected one of: requestLimit, concurrencyLimit, sharedLimit, noLimit.`
       );
     }

@@ -23,15 +23,18 @@ setup and explains what each piece is for.
 
 ## Rate limits
 
-Every client picks exactly one strategy. That choice decides how the client
-behaves under contention, so it is worth matching to the limit the vendor
-actually publishes rather than to the one that is easiest to configure.
+A client picks a strategy per budget it has to respect — usually one, sometimes
+several. That choice decides how the client behaves under contention, so it is
+worth matching to the limit the vendor actually publishes rather than to the one
+that is easiest to configure.
 
 - [Choosing a rate limit](rate-limits/README.md) — the decision, side by side
 - [`noLimit`](rate-limits/no-limit.md) — no budget to coordinate
 - [`requestLimit`](rate-limits/request-limit.md) — a token bucket, the common case
 - [`concurrencyLimit`](rate-limits/concurrency-limit.md) — N in flight at once
 - [`sharedLimit`](rate-limits/shared-limit.md) — several credentials, one budget
+- [Several limits at once](rate-limits/multiple-limits.md) — per-second *and*
+  per-day, or a rate *and* a concurrency ceiling
 
 ## Backends
 

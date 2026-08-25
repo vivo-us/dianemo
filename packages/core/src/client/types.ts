@@ -59,8 +59,8 @@ export interface BasicCredentials extends BaseCredentialsData {
 }
 
 export type RateLimitChange<
-  R extends RateLimitData = RateLimitData,
-  N extends RateLimitData = R,
+  R extends RateLimitConfig = RateLimitConfig,
+  N extends RateLimitConfig = R,
 > = (
   oldRateLimit: R,
   response: AxiosResponse
@@ -89,7 +89,7 @@ export interface ProbeRequestConfig {
   intervalMs: number;
 }
 
-export interface CreateClientData<R extends RateLimitData = RateLimitData> {
+export interface CreateClientData<R extends RateLimitConfig = RateLimitConfig> {
   name: string;
   /**
    * Which client's credential entry this one uses. Set internally when a
@@ -99,7 +99,13 @@ export interface CreateClientData<R extends RateLimitData = RateLimitData> {
    * Not for callers to set — `generateClients` derives it.
    */
   authOwnerName?: string;
-  /** The Rate Limit info for the Client. Defaults to `noLimit`. */
+  /**
+   * The Rate Limit info for the Client. Defaults to `noLimit`.
+   *
+   * An array declares several limits that must **all** admit a request before it
+   * is sent — a per-second and a per-day cap, say. Every entry needs a `name`.
+   * See docs/rate-limits/multiple-limits.md.
+   */
   rateLimit?: R;
   /**
    * Computes a dynamic budget update. Shared clients receive their shared-limit
@@ -107,11 +113,13 @@ export interface CreateClientData<R extends RateLimitData = RateLimitData> {
    */
   rateLimitChange?: RateLimitChange<
     R,
-    [RateLimitData] extends [R]
-      ? RateLimitData
-      : R extends SharedLimitClientOptions
-        ? Exclude<RateLimitData, SharedLimitClientOptions>
-        : R
+    [RateLimitConfig] extends [R]
+      ? RateLimitConfig
+      : R extends readonly NamedRateLimitData[]
+        ? NamedRateLimitData[]
+        : R extends SharedLimitClientOptions
+          ? Exclude<RateLimitData, SharedLimitClientOptions>
+          : R
   >;
   requestOptions?: RequestOptions;
   retryOptions?: Partial<RetryOptions>;
@@ -134,7 +142,7 @@ export interface CreateClientData<R extends RateLimitData = RateLimitData> {
 
 export interface RateLimitUpdatedData {
   clientName: string;
-  rateLimit: RateLimitData;
+  rateLimit: RateLimitConfig;
   /**
    * `init` at construction, `operator` for an admin update, `dynamic` from a
    * `rateLimitChange` callback. A listener that persists changes filters on this.
@@ -154,6 +162,19 @@ export type RateLimitData =
   | ConcurrencyLimitClientOptions
   | NoLimitClientOptions
   | SharedLimitClientOptions;
+
+/**
+ * One entry of a multi-limit array: any rate limit, plus the `name` its budget
+ * is keyed under. Names must match `/^[a-z0-9_]{1,64}$/` and be unique within
+ * the client, because they become backend key segments.
+ */
+export type NamedRateLimitData = RateLimitData & { name: string };
+
+/**
+ * What a client declares as its `rateLimit`: one limit, or several that must all
+ * admit before a request is sent. See docs/rate-limits/multiple-limits.md.
+ */
+export type RateLimitConfig = RateLimitData | NamedRateLimitData[];
 
 export interface NoLimitClientOptions {
   type: "noLimit";
@@ -181,11 +202,21 @@ export interface SharedLimitClientOptions {
   clientName: string;
 }
 
-export type RateLimitStats =
+export type SingleRateLimitStats =
   | RequestLimitClientStats
   | ConcurrencyLimitClientOptions
   | NoLimitClientOptions
   | SharedLimitClientOptions;
+
+export type RateLimitStats = SingleRateLimitStats | MultiRateLimitStats;
+
+export type NamedRateLimitStats = SingleRateLimitStats & { name: string };
+
+/** What a client with several limits reports: one entry per declared limit. */
+export interface MultiRateLimitStats {
+  type: "multiLimit";
+  limits: NamedRateLimitStats[];
+}
 
 export interface RequestLimitClientStats extends RequestLimitClientOptions {
   tokens: number;

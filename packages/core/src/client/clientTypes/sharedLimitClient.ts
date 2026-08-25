@@ -1,3 +1,4 @@
+import { shortestRefillInterval } from "../../utils/rateLimit.js";
 import type { RequestDoneData } from "../../request/types.js";
 import { ClientUnavailableError } from "../../errors.js";
 import BaseClient from "../index.js";
@@ -25,6 +26,9 @@ class SharedLimitClient extends BaseClient {
   }
 
   public handleRateLimitUpdated(data: RateLimitUpdatedData) {
+    // An array would mean a different client class, which a broadcast cannot
+    // change; the rebuild path is what swaps one client for another.
+    if (Array.isArray(data.rateLimit)) return;
     if (data.rateLimit.type !== "sharedLimit") return;
     this.rateLimit = data.rateLimit;
   }
@@ -70,9 +74,10 @@ class SharedLimitClient extends BaseClient {
     // at all for a child with `retryBackoffBaseTime: 0`.
     const base = super.getFreezeBaseTime();
     const parent = this.getParentRateLimit?.();
-    return parent?.type === "requestLimit"
-      ? Math.max(parent.interval, base)
-      : base;
+    // The shortest of the owner's refill intervals when it declares several: the
+    // longest would floor every freeze at the owner's slowest quota.
+    const interval = parent ? shortestRefillInterval(parent) : undefined;
+    return interval === undefined ? base : Math.max(interval, base);
   }
 
   protected handleDestroy() {}

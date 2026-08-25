@@ -111,6 +111,7 @@ The manual lives in [`docs/`](docs/README.md).
 - [Getting started](docs/getting-started.md) — a working setup, explained in the order the pieces matter
 - [Concepts](docs/concepts.md) — sub-clients, grants, overrides, leader election, freeze/thaw
 - [Choosing a rate limit](docs/rate-limits/README.md) — the four strategies, side by side
+- [Several limits at once](docs/rate-limits/multiple-limits.md) — per-second *and* per-day, or a rate *and* a concurrency ceiling
 - [Choosing a backend](docs/backends/README.md) — where shared state lives
 - [Writing a plugin](docs/writing-plugins.md) — packaging an integration
 - [Benchmarks](docs/benchmarks.md) — what each scenario measures, and the numbers

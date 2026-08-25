@@ -21,6 +21,11 @@ each client its own [`requestLimit`](request-limit.md). If the credentials
 belong to different tenants of the same client and each has its own quota, use
 per-grant isolation instead.
 
+A client that needs the shared budget **and** a limit of its own is not
+supported: this type has no queue of its own, and a client with local budgets
+would need one. Model it as two clients instead. See
+[several limits on one client](multiple-limits.md).
+
 ## How it works
 
 A `sharedLimit` client is constructed with the **parent's** name. Its queue,
@@ -67,3 +72,8 @@ The parent must exist before a client can share its limit. In a plugin's
 template builder, register the parent first: the child resolves the parent by
 name at construction, and a name that does not resolve is a configuration error
 rather than a silent fallback to unlimited.
+
+The parent must also own a budget in its own right: pointing at another
+`sharedLimit` client is refused, since that one owns nothing to share. A parent
+declaring [several limits](multiple-limits.md) is fine — the child takes the
+parent's queue as its own, so the parent's controller claims every one of them.

@@ -1,4 +1,6 @@
 import type { RequestMetadata } from "../../request/types.js";
+import { assertUsableBudget } from "../../utils/rateLimit.js";
+import type { MultiLimitSpec } from "../../backend/types.js";
 import BaseClient from "../index.js";
 import {
   ClientFrozenError,
@@ -28,6 +30,9 @@ class RequestLimitClient extends BaseClient {
   }
 
   public handleRateLimitUpdated(data: RateLimitUpdatedData) {
+    // An array would mean a different client class, which a broadcast cannot
+    // change; the rebuild path is what swaps one client for another.
+    if (Array.isArray(data.rateLimit)) return;
     if (data.rateLimit.type !== "requestLimit") return;
     // A dynamic update arrives from `rateLimitChange` — often parsed out of a
     // vendor header — so it is the likeliest source of a budget that can never
@@ -212,42 +217,22 @@ class RequestLimitClient extends BaseClient {
     );
   }
 
-  protected handleDestroy(): void {}
-}
+  /** One bucket, so a client sharing this budget spends the same balance. */
+  public getLimitSpecs(grantId: string | undefined): MultiLimitSpec[] {
+    return [
+      {
+        kind: "tokenBucket",
+        key: this.getRateLimitKey(grantId),
+        config: {
+          maxTokens: this.rateLimit.maxTokens,
+          tokensToAdd: this.rateLimit.tokensToAdd,
+          interval: this.rateLimit.interval,
+        },
+      },
+    ];
+  }
 
-/**
- * Rejects a token-bucket budget that can never hand out a token.
- *
- * `tokensToAdd <= 0` is the dangerous one: the bucket drains, nothing refills
- * it, and every backend reports "not acquired, wait 0ms" forever. A config typo
- * or a `rateLimitChange` that parses a header into 0 or NaN both land here, so
- * this is the only thing standing between either and the acquire loop.
- */
-function assertUsableBudget(
-  rateLimit: RequestLimitClientOptions,
-  clientName: string
-): void {
-  const problems: string[] = [];
-  if (!Number.isFinite(rateLimit.tokensToAdd) || rateLimit.tokensToAdd <= 0) {
-    problems.push(`tokensToAdd must be greater than 0`);
-  }
-  if (!Number.isFinite(rateLimit.interval) || rateLimit.interval <= 0) {
-    problems.push(`interval must be greater than 0`);
-  }
-  if (!Number.isFinite(rateLimit.maxTokens) || rateLimit.maxTokens <= 0) {
-    problems.push(`maxTokens must be greater than 0`);
-  }
-  if (!problems.length) return;
-  throw new ConfigurationError(
-    "invalid_rate_limit",
-    `Client "${clientName}" has an unusable requestLimit: ${problems.join(
-      "; "
-    )}. Received ${JSON.stringify({
-      maxTokens: rateLimit.maxTokens,
-      tokensToAdd: rateLimit.tokensToAdd,
-      interval: rateLimit.interval,
-    })}.`
-  );
+  protected handleDestroy(): void {}
 }
 
 export default RequestLimitClient;
