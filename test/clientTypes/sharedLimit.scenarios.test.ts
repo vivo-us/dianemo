@@ -43,11 +43,11 @@ const CHILD = "child:_:a";
 const CHILD2 = "child2:_:a";
 
 const keys = (client: string) => ({
-  bucket: `${NS}:${client}:rateLimit`,
+  bucket: `${NS}:${client}:rateLimit:default`,
   queue: `${NS}:${client}:queue`,
   meta: `${NS}:${client}:request`,
   freeze: `${NS}:${client}:freezeState`,
-  concurrency: `${NS}:${client}:concurrency`,
+  concurrency: `${NS}:${client}:concurrency:default`,
   oauth2: `${NS}:${client}:oauth2`,
 });
 
@@ -1193,13 +1193,13 @@ describe.each(harnesses(12))("sharedLimit scenarios — $name", (harness) => {
         await fireAt(handler, CHILD, { url: "/hdr" });
         await settle(150);
         const parentStats = await handler.getClientStats(PARENT);
-        expect(parentStats.rateLimit).toMatchObject({
+        expect(parentStats.rateLimit[0]).toMatchObject({
           type: "requestLimit",
           maxTokens: 2,
         });
         // The child's own reported limit is untouched: it never has a budget.
         const childStats = await handler.getClientStats(CHILD);
-        expect(childStats.rateLimit).toMatchObject({ type: "sharedLimit" });
+        expect(childStats.rateLimit[0]).toMatchObject({ type: "sharedLimit" });
       },
       {
         child: {
@@ -1271,7 +1271,7 @@ describe.each(harnesses(12))("sharedLimit scenarios — $name", (harness) => {
         // The rebuild really happened, and the child resolves the parent's
         // ceiling live rather than caching the instance it was built against.
         const parentStats = await handler.getClientStats(PARENT);
-        expect(parentStats.rateLimit).toMatchObject({ maxTokens: 7 });
+        expect(parentStats.rateLimit[0]).toMatchObject({ maxTokens: 7 });
         up.setRoute(ok);
         await expect(
           fireAt(handler, CHILD, { url: "/toobig", cost: 8 })
@@ -1342,7 +1342,7 @@ describe.each(harnesses(12))("sharedLimit scenarios — $name", (harness) => {
   it("meters a child's grant traffic against the parent's isolated grant bucket", async () => {
     await isolatedPair(2, async (handler, backend) => {
       await seedGrant(handler, "g1");
-      const grantBucket = `${NS}:${PARENT}:grant:g1:rateLimit`;
+      const grantBucket = `${NS}:${PARENT}:grant:g1:rateLimit:default`;
 
       const fromParent = await fireAt(handler, PARENT, {
         url: "/p",
@@ -1366,7 +1366,7 @@ describe.each(harnesses(12))("sharedLimit scenarios — $name", (harness) => {
       // The child has no bucket at either scope.
       expect(await backend.hgetall(C.bucket)).toEqual({});
       expect(
-        await backend.hgetall(`${NS}:${CHILD}:grant:g1:rateLimit`)
+        await backend.hgetall(`${NS}:${CHILD}:grant:g1:rateLimit:default`)
       ).toEqual({});
 
       // Two tokens for this grant, one spent by each side: the third request
@@ -1395,10 +1395,20 @@ describe.each(harnesses(12))("sharedLimit scenarios — $name", (harness) => {
       ).toBe(200);
 
       expect(
-        await spent(backend, 600_000, 1, `${NS}:${PARENT}:grant:g1:rateLimit`)
+        await spent(
+          backend,
+          600_000,
+          1,
+          `${NS}:${PARENT}:grant:g1:rateLimit:default`
+        )
       ).toBe(1);
       expect(
-        await spent(backend, 600_000, 1, `${NS}:${PARENT}:grant:g2:rateLimit`)
+        await spent(
+          backend,
+          600_000,
+          1,
+          `${NS}:${PARENT}:grant:g2:rateLimit:default`
+        )
       ).toBe(1);
 
       // ...and g1 really is exhausted, from the parent's side as well.

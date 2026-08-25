@@ -467,7 +467,7 @@ for (const harness of harnesses(7)) {
         expect(await pending).toBe("ok");
 
         const slots = await backend.getConcurrencyState(
-          `${handler.getNamespace()}:r:_:a:concurrency`,
+          `${handler.getNamespace()}:r:_:a:concurrency:default`,
           120_000
         );
         expect(slots.activeRequests).toEqual([]);

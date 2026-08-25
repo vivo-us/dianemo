@@ -112,7 +112,7 @@ describe("audit round 3 regressions", () => {
     ).rejects.toBeInstanceOf(RequestAbortedError);
     expect(target.hits()).toBe(0);
     const state = await backend.getTokenBucketState(
-      "requestHandler:default:rateLimit",
+      "requestHandler:default:rateLimit:default",
       { interval: 60_000, tokensToAdd: 1, maxTokens: 1 }
     );
     expect(state.tokens).toBe(1);
@@ -300,13 +300,13 @@ describe("audit round 3 regressions", () => {
     });
     const deadline = Date.now() + 1000;
     let state = await backend.getConcurrencyState(
-      "requestHandler:default:concurrency",
+      "requestHandler:default:concurrency:default",
       120_000
     );
     while (state.currentConcurrency !== 0 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 10));
       state = await backend.getConcurrencyState(
-        "requestHandler:default:concurrency",
+        "requestHandler:default:concurrency:default",
         120_000
       );
     }

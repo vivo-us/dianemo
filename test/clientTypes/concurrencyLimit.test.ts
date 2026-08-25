@@ -22,7 +22,7 @@ describe.each(harnesses(6))("concurrencyLimit — $name", (harness) => {
   });
 
   const CLIENT = "cl:_:a";
-  const SLOTS = "ct:requestHandler:cl:_:a:concurrency";
+  const SLOTS = "ct:requestHandler:cl:_:a:concurrency:default";
 
   const run = (maxConcurrency: number, fn: Parameters<typeof withHandler>[3]) =>
     withHandler(
@@ -115,9 +115,11 @@ describe.each(harnesses(6))("concurrencyLimit — $name", (harness) => {
   it("reports its configuration in stats", async () => {
     await run(3, async (handler) => {
       await fireMany(handler, CLIENT, 5);
-      expect(await handler.getClientStats(CLIENT)).toMatchObject({
-        rateLimit: { type: "concurrencyLimit", maxConcurrency: 3 },
-      });
+      const { rateLimit } = await handler.getClientStats(CLIENT);
+      // One limit, reported the way several are: one named entry apiece.
+      expect(rateLimit).toEqual([
+        { type: "concurrencyLimit", maxConcurrency: 3, name: "default" },
+      ]);
     });
   }, 30_000);
 });

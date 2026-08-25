@@ -24,8 +24,8 @@ import {
 } from "./utils/templateClients.js";
 import type {
   CreateClientData,
+  NamedRateLimitData,
   ProbeRequestConfig,
-  RateLimitConfig,
   SetGrantTokensData,
 } from "./client/types.js";
 import {
@@ -151,8 +151,6 @@ export type {
   ConcurrencyLimitClientOptions,
   SharedLimitClientOptions,
   RateLimitStats,
-  SingleRateLimitStats,
-  MultiRateLimitStats,
   NamedRateLimitStats,
 } from "./client/types.js";
 export type {
@@ -566,7 +564,7 @@ export default class RequestHandler {
   /** Loaded clients with their effective rate limit — template default plus overrides. */
   public getLoadedClients(): Array<{
     name: string;
-    rateLimit: RateLimitConfig;
+    rateLimit: NamedRateLimitData[];
   }> {
     return Array.from(this.clients.values()).map((c) => ({
       name: c.getName(),

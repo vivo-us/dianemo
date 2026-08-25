@@ -142,6 +142,12 @@ export interface CreateClientData<R extends RateLimitConfig = RateLimitConfig> {
 
 export interface RateLimitUpdatedData {
   clientName: string;
+  /**
+   * Dianemo publishes this normalised, so a listener sees one shape whichever
+   * shape the change was written in. Typed as the declared shape because a
+   * receiver also has to accept what an operator or an older replica sends, and
+   * every `handleRateLimitUpdated` normalises again on receipt.
+   */
   rateLimit: RateLimitConfig;
   /**
    * `init` at construction, `operator` for an admin update, `dynamic` from a
@@ -202,21 +208,15 @@ export interface SharedLimitClientOptions {
   clientName: string;
 }
 
-export type SingleRateLimitStats =
+/** What one declared limit reports, before its name is attached. */
+export type RateLimitStats =
   | RequestLimitClientStats
   | ConcurrencyLimitClientOptions
   | NoLimitClientOptions
   | SharedLimitClientOptions;
 
-export type RateLimitStats = SingleRateLimitStats | MultiRateLimitStats;
-
-export type NamedRateLimitStats = SingleRateLimitStats & { name: string };
-
-/** What a client with several limits reports: one entry per declared limit. */
-export interface MultiRateLimitStats {
-  type: "multiLimit";
-  limits: NamedRateLimitStats[];
-}
+/** How `getClientStats` reports a limit: one entry per declared limit. */
+export type NamedRateLimitStats = RateLimitStats & { name: string };
 
 export interface RequestLimitClientStats extends RequestLimitClientOptions {
   tokens: number;
@@ -308,7 +308,7 @@ export interface ClientStatistics {
   isFrozen: boolean;
   isThawing: boolean;
   thawRequestCount: number;
-  rateLimit: RateLimitStats;
+  rateLimit: NamedRateLimitStats[];
   requestsInQueue: ClientRequestsStatistics;
   requestsInProgress: ClientRequestsStatistics;
 }

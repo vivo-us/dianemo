@@ -598,7 +598,7 @@ describe("an absent rate limit is the only one that defaults", () => {
       const loaded = handler
         .getLoadedClients()
         .find((c) => c.name === "caps:_:a");
-      expect(loaded?.rateLimit).toEqual({ type: "noLimit" });
+      expect(loaded?.rateLimit).toEqual([{ type: "noLimit", name: "default" }]);
     } finally {
       await handler.stop();
     }

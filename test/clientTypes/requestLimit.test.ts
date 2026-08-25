@@ -20,7 +20,7 @@ describe.each(harnesses(5))("requestLimit — $name", (harness) => {
   });
 
   const CLIENT = "rl:_:a";
-  const BUCKET = "ct:requestHandler:rl:_:a:rateLimit";
+  const BUCKET = "ct:requestHandler:rl:_:a:rateLimit:default";
   const QUEUE = "ct:requestHandler:rl:_:a:queue";
   const META = "ct:requestHandler:rl:_:a:request";
 
@@ -131,8 +131,13 @@ describe.each(harnesses(5))("requestLimit — $name", (harness) => {
       async (handler) => {
         await fireMany(handler, CLIENT, 10);
         const stats = await handler.getClientStats(CLIENT);
-        expect(stats.rateLimit).toMatchObject({ type: "requestLimit" });
-        expect((stats.rateLimit as { tokens: number }).tokens).toBe(90);
+        // One limit, reported the same way several are: a named entry apiece.
+        expect(stats.rateLimit).toHaveLength(1);
+        expect(stats.rateLimit[0]).toMatchObject({
+          type: "requestLimit",
+          name: "default",
+          tokens: 90,
+        });
       }
     );
   }, 30_000);

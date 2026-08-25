@@ -120,7 +120,7 @@ describe.each(harnesses)("handler end to end — $name", (harness) => {
 
   const QUEUE = "e2e:requestHandler:t:_:a:queue";
   const META = "e2e:requestHandler:t:_:a:request";
-  const CONCURRENCY = "e2e:requestHandler:t:_:a:concurrency";
+  const CONCURRENCY = "e2e:requestHandler:t:_:a:concurrency:default";
 
   it("serves an unlimited client without touching the queue", async () => {
     await withHandler({ type: "noLimit" }, async (handler, name, backend) => {

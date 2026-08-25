@@ -989,7 +989,7 @@ describe.skipIf(!HAS_REDIS)("backend failure: errors from a script", () => {
           // The failed attempt claimed nothing it did not hand back: one token
           // spent for one request served.
           const stats = await handler.getClientStats(name);
-          expect(stats.rateLimit).toMatchObject({ tokens: 49 });
+          expect(stats.rateLimit[0]).toMatchObject({ tokens: 49 });
           expect(await admin.zcard(queueKey)).toBe(0);
         }
       );
@@ -1218,7 +1218,7 @@ describe.skipIf(!HAS_REDIS)("backend failure: partial lifecycles", () => {
         },
         async ({ handler, backend, clientName, namespaceOf }) => {
           const name = clientName("bfsl");
-          const slotKey = `${namespaceOf("bfsl")}:concurrency`;
+          const slotKey = `${namespaceOf("bfsl")}:concurrency:default`;
 
           const inFlight = track(fire(handler, name));
           await waitForInFlight(upstream);

@@ -20,6 +20,30 @@ import type {
 const RATE_LIMIT_NAME = /^[a-z0-9_]{1,64}$/;
 
 /**
+ * The name a client's limit takes when it declares one without naming it.
+ *
+ * Every limit is named internally, so there is one key shape and one config
+ * shape rather than two of each; a caller writing the single form is simply
+ * given this. It reads as a name because it becomes one, in the key and in
+ * `getClientStats`.
+ */
+export const DEFAULT_RATE_LIMIT_NAME = "default";
+
+/**
+ * A declared config as the array everything downstream works in.
+ *
+ * Called once, where the client is built, so nothing past that point has to ask
+ * which of the two shapes it was handed. Validate before normalising: the single
+ * form is exempt from the name rule precisely because it has no name to check.
+ */
+export function normalizeRateLimit(
+  config: RateLimitConfig
+): NamedRateLimitData[] {
+  if (isMultiRateLimit(config)) return config;
+  return [{ ...config, name: DEFAULT_RATE_LIMIT_NAME }];
+}
+
+/**
  * Whether a config is nothing but a `sharedLimit` — one entry, or the bare
  * single form.
  *
@@ -31,6 +55,23 @@ const RATE_LIMIT_NAME = /^[a-z0-9_]{1,64}$/;
 export function isSharedLimitOnly(config: RateLimitConfig): boolean {
   const entries = rateLimitEntries(config);
   return entries.length === 1 && entries[0]?.type === "sharedLimit";
+}
+
+/** The lone limit of a config that declares exactly one, else `undefined`. */
+export function soleRateLimit(
+  config: readonly NamedRateLimitData[]
+): NamedRateLimitData | undefined {
+  return config.length === 1 ? config[0] : undefined;
+}
+
+/** Whether anything here actually meters a request. */
+export function hasMeteredBudget(
+  config: readonly NamedRateLimitData[]
+): boolean {
+  return config.some(
+    (limit) =>
+      limit.type === "requestLimit" || limit.type === "concurrencyLimit"
+  );
 }
 
 /** Whether a client declared several limits rather than one. */

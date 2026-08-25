@@ -171,8 +171,8 @@ paths is still accepted in that argument, as it was before this grew a wrapper.
 **An override must keep the shape of the template default** — the same `type`,
 or an array where the default is an [array](rate-limits/multiple-limits.md). The
 merge swaps fields within the discriminant, so moving from `requestLimit` to
-`concurrencyLimit`, or from one limit to several, would change which client class
-is constructed. Either is skipped with a warning rather than applied.
+`concurrencyLimit`, or from one limit to several, changes what the template said
+this client is. Either is skipped with a warning rather than applied.
 
 This is the operator-side escape hatch and needs no permission from the template.
 For a choice the plugin itself sanctions — a subscription plan, picked from a
@@ -229,9 +229,13 @@ name:
 
 ```
 <keyPrefix>:requestHandler:<clientName>:freezeState
-<keyPrefix>:requestHandler:<clientName>:rateLimit
-<keyPrefix>:requestHandler:<clientName>:concurrency
+<keyPrefix>:requestHandler:<clientName>:rateLimit:<limitName>
+<keyPrefix>:requestHandler:<clientName>:concurrency:<limitName>
 ```
+
+A budget carries the name of the limit that owns it, so a client declaring
+[several](rate-limits/multiple-limits.md) keeps them apart. A limit written in
+the single form is named `default`.
 
 `<keyPrefix>:` is absent if you did not configure one, and spaces in a client
 name become underscores. A grant-isolated client freezes each grant separately,

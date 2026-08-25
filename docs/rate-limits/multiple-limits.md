@@ -29,9 +29,19 @@ configuration error rather than a last-one-wins merge. So is an entry with no
 name, an empty array, and a name with a colon, a space or a capital in it — all
 three would otherwise resolve to a key that is ambiguous or needs escaping.
 
-A single limit keeps the un-suffixed `<client namespace>:rateLimit` key it has
-always used, so moving an existing client to the array form starts its budgets
-fresh rather than inheriting the old balance under a new name.
+**A limit written in the single form is named `default`.** Internally there is
+one shape — an array of named limits — and a config declaring one limit is simply
+an array of one, so its budget lives at `<client namespace>:rateLimit:default`
+and `getClientStats` reports it under that name. Nothing about writing the single
+form changes; it is sugar for the array, normalised once when the client is built.
+
+> **Upgrading:** this moved. Budgets used to live at the un-suffixed
+> `<client namespace>:rateLimit`, and those keys are orphaned by the change. A
+> bucket that does not exist reads as **full**, so the first requests after the
+> upgrade meet a fresh budget and can burst up to `maxTokens` before the new key
+> starts metering. Deploy it where a single interval of extra headroom is
+> acceptable, or clear the old keys and let the new ones start at their ceiling
+> deliberately.
 
 ## What may go in the array
 
@@ -67,10 +77,12 @@ So the claim is one backend operation: a single Lua script on Redis, a single
 synchronous pass on the memory backend. Both evaluate every budget before
 committing to any.
 
-This is why the multi-limit client needs a backend implementing
-`acquireMultiLimit` and `releaseMultiLimit`. Both shipped backends do. A backend
-written against an earlier version does not, and a client declaring several
-limits refuses to start on it rather than silently metering against one.
+This is why a client declaring **more than one** budget needs a backend
+implementing `acquireMultiLimit` and `releaseMultiLimit`. Both shipped backends
+do. A backend written against an earlier version does not, and such a client
+refuses to start on it rather than silently metering against one. A client with a
+single budget is unaffected: it uses the single-key calls every backend has
+always had.
 
 ## What the tightest limit decides
 
@@ -159,26 +171,26 @@ its budgets, atomically, whatever they are called:
 
 ## Dynamic updates
 
-`rateLimitChange` receives the whole array and returns a whole array. An update
-that is not an array is ignored, because a single limit would mean a different
-client class and a broadcast cannot change that — the rebuild path is what swaps
-one client for another.
+`rateLimitChange` receives the client's limits and returns a replacement. Either
+shape is accepted and normalised on receipt, so a callback written against the
+single form keeps working. An update naming a `sharedLimit` is ignored: that
+would mean a different client class, and a broadcast cannot change which class a
+client is — the rebuild path is what swaps one for another.
 
 An update whose entries are unusable is refused and logged, keeping the last
 workable configuration rather than wedging the client.
 
 ## Stats
 
-`getClientStats` reports one entry per declared limit:
+`getClientStats().rateLimit` is a list, one entry per declared limit:
 
 ```ts
-{
-  type: "multiLimit",
-  limits: [
-    { name: "per_second", type: "requestLimit", interval: 1000, tokensToAdd: 20, maxTokens: 20, tokens: 17 },
-    { name: "per_day", type: "requestLimit", interval: 86400000, tokensToAdd: 50000, maxTokens: 50000, tokens: 49873 },
-  ],
-}
+[
+  { name: "per_second", type: "requestLimit", interval: 1000, tokensToAdd: 20, maxTokens: 20, tokens: 17 },
+  { name: "per_day", type: "requestLimit", interval: 86400000, tokensToAdd: 50000, maxTokens: 50000, tokens: 49873 },
+]
 ```
 
-A consumer switching on `rateLimit.type` gains a `"multiLimit"` case.
+A client declaring one limit reports a list of one, named `default`. A consumer
+that read `rateLimit.type` reads `rateLimit[0].type`, or looks the entry up by
+name.

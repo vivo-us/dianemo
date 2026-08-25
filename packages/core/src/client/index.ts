@@ -1,9 +1,9 @@
 import type { RequestDoneData, RequestMetadata } from "../request/types.js";
 import { ClientUnavailableError, NotOAuth2ClientError } from "../errors.js";
+import { costCeilingFor, normalizeRateLimit } from "../utils/rateLimit.js";
 import { REQUEST_TOMBSTONE_TTL_SECONDS } from "../backend/ttl.js";
 import processRequests from "./methods/processRequests.js";
 import type { QueuedRequest } from "../backend/types.js";
-import { costCeilingFor } from "../utils/rateLimit.js";
 import handleRequest from "./methods/handleRequest.js";
 import { encrypt } from "../utils/encryption.js";
 import type * as ClientTypes from "./types.js";
@@ -60,7 +60,7 @@ abstract class BaseClient {
   protected authNamespace: string;
   protected emitter: NodeJS.EventEmitter;
   protected logger: Logger;
-  protected abstract rateLimit: ClientTypes.RateLimitConfig;
+  protected abstract rateLimit: ClientTypes.NamedRateLimitData[];
   protected metadata?: { [key: string]: unknown };
   protected requestOptions: ClientTypes.RequestOptions;
   protected authData?: ClientTypes.AuthCreateData;
@@ -152,7 +152,9 @@ abstract class BaseClient {
   public abstract handleRateLimitUpdated(
     data: ClientTypes.RateLimitUpdatedData
   ): Promise<void> | void;
-  protected abstract getRateLimitStats(): Promise<ClientTypes.RateLimitStats>;
+  protected abstract getRateLimitStats(): Promise<
+    ClientTypes.NamedRateLimitStats[]
+  >;
 
   /**
    * Whether this request can skip the queue entirely.
@@ -168,19 +170,26 @@ abstract class BaseClient {
     return false;
   }
   /**
-   * Gives back whatever `canProcessNextRequest` claimed, when the caller then
-   * decides not to run the request after all.
+   * Returns capacity claimed for an attempt that will not be dispatched.
    *
-   * Admission and claiming are the same step for a concurrency client, so any
-   * path that admits and then backs out strands a slot until its TTL expires.
-   * No-op for the client types that claim nothing.
+   * Nothing is claimed before `tryAcquireTurn`, so this is the only path that
+   * gives capacity back outside of completion.
    */
-  protected async releaseAdmission(_request: RequestMetadata): Promise<void> {}
-
   protected async refundUnusedAdmission(
-    request: RequestMetadata
-  ): Promise<void> {
-    await this.releaseAdmission(request);
+    _request: RequestMetadata
+  ): Promise<void> {}
+
+  /**
+   * Whether a claim here has to be handed back explicitly, rather than simply
+   * being spent.
+   *
+   * True for a concurrency budget, whose slot is released on completion — so a
+   * request that completed while it was being admitted leaves a slot nothing
+   * will ever release. Only those clients pay the extra read that catches it;
+   * a token bucket's spend is not recoverable that way and never was.
+   */
+  protected claimsReleasableCapacity(): boolean {
+    return false;
   }
 
   /** Returns capacity claimed for an attempt that will not be dispatched. */
@@ -196,16 +205,6 @@ abstract class BaseClient {
    * and uninformatively. Subclasses with such a dependency throw here instead.
    */
   protected async assertReadyToQueue(): Promise<void> {}
-
-  /**
-   * Whether admission claims capacity that must later be handed back.
-   *
-   * Only these clients need the drain loop to confirm a request is still queued
-   * after claiming, so the rest do not pay the extra read on the hot path.
-   */
-  protected claimsOnAdmission(): boolean {
-    return false;
-  }
 
   /**
    * Claims whatever budget the request still needs, without ever blocking: the
@@ -367,7 +366,9 @@ abstract class BaseClient {
   ) {
     const updatedData: ClientTypes.RateLimitUpdatedData = {
       clientName: this.name,
-      rateLimit: data,
+      // Normalised here rather than at each receiver, so every listener and every
+      // `handleRateLimitUpdated` sees the one shape.
+      rateLimit: normalizeRateLimit(data),
       source,
       publisherInstanceId: this.instanceId,
     };
@@ -708,7 +709,7 @@ abstract class BaseClient {
     return this.role;
   }
 
-  public getRateLimit(): ClientTypes.RateLimitConfig {
+  public getRateLimit(): ClientTypes.NamedRateLimitData[] {
     return this.rateLimit;
   }
 
@@ -821,7 +822,8 @@ abstract class BaseClient {
    * Resolves the rate limit this client draws on, for a `sharedLimit` child.
    * Injected by `createClients`, which is where the client registry lives.
    */
-  public getParentRateLimit?: () => ClientTypes.RateLimitConfig | undefined;
+  public getParentRateLimit?: () =>
+    ClientTypes.NamedRateLimitData[] | undefined;
 
   /**
    * The budgets a request must claim here, in the form the backend takes them.

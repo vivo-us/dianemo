@@ -169,9 +169,9 @@ async function withClient(
   }
 }
 
-const SLOTS = `${PREFIX}:requestHandler:cs:_:a:concurrency`;
+const SLOTS = `${PREFIX}:requestHandler:cs:_:a:concurrency:default`;
 const grantSlots = (grantId: string) =>
-  `${PREFIX}:requestHandler:cs:_:a:grant:${grantId}:concurrency`;
+  `${PREFIX}:requestHandler:cs:_:a:grant:${grantId}:concurrency:default`;
 
 const occupancy = async (backend: DianemoBackend, key = SLOTS) =>
   (await backend.getConcurrencyState(key, 600_000)).currentConcurrency;

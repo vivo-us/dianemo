@@ -325,6 +325,38 @@ matters for anything routing by key: Redis Cluster, a proxy, an active-active
 deployment. **Dianemo supports a single logical keyspace only**, which is why no
 Cluster adapter exists and `redisBackend` types its parameter as `Redis`.
 
+## One config shape, one client class
+
+`rateLimit` is declared as a single limit or an array of named ones, and is
+normalised to the array **once**, in `createClient`. Nothing past that point asks
+which shape it was handed: `BaseClient.rateLimit` is always
+`NamedRateLimitData[]`, `getClientStats().rateLimit` is always a list, and a limit
+written without a name is named `default`.
+
+That is what collapses the client types. There is no `RequestLimitClient`,
+`ConcurrencyLimitClient` or `NoLimitClient` — the only thing that varied between
+them was which backend call claimed the budget, which is a branch, not a class.
+`MeteredClient` covers every client that meters against budgets of its own, one
+of them or several, and keeps the single-key backend calls as a fast path for the
+one-budget case: same decision, one round trip instead of an encoded spec list.
+
+`SharedLimitClient` survives as the one genuine exception. It owns no budget and
+no queue — it is constructed with the owner's name — so it is a different thing
+rather than a different budget, and it may not be combined with other limits.
+
+Two things follow that are easy to get wrong:
+
+- **Derive, do not cache, anything read off `rateLimit`.** `sole` and `metered`
+  are getters. A cached copy is a second reading that a write can leave behind,
+  and the two disagreeing would have the claim spend against one budget while the
+  ceiling was checked against another.
+- **Nothing claims capacity before `tryAcquireTurn`.** Concurrency used to claim
+  in `canProcessNextRequest`, which is why the drain loop confirmed the entry was
+  still queued *before* admitting. That confirmation now sits after the claim,
+  gated on `claimsReleasableCapacity()`, and the solo-concurrency path uses
+  `acquireQueuedConcurrency` so the status check and the claim are one operation.
+  `claimsOnAdmission` and `releaseAdmission` are gone with the old ordering.
+
 ## Several budgets are claimed in one operation, or not at all
 
 A client can declare an array of rate limits, and a request must claim every one
@@ -357,8 +389,9 @@ Three consequences worth knowing before touching that code:
 
 ## A multi-limit freeze does not empty the buckets
 
-A single `requestLimit` client zeroes its bucket on a 429: the response is proof
-that the bucket's picture of the vendor was wrong.
+A client declaring exactly one `requestLimit` zeroes its bucket on a 429: the
+response is proof that the bucket's picture of the vendor was wrong, and with one
+bucket that says which one.
 
 A client with several budgets does not, and the difference is deliberate. The
 response does not say which limit was breached, so zeroing every bucket would

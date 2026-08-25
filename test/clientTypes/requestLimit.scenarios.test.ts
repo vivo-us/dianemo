@@ -276,7 +276,13 @@ async function withClient(
       enqueues: () => enqueues,
       completions: () => [...completions],
       bucket: (grantId) =>
-        raw.getTokenBucketState(grantPath(grantId, "rateLimit"), config),
+        // Every limit is named internally, and a client declaring one is given
+        // the default name — so its bucket lives one segment deeper than the
+        // freeze state beside it.
+        raw.getTokenBucketState(
+          grantPath(grantId, "rateLimit:default"),
+          config
+        ),
       freeze: (grantId) =>
         raw.getFreezeState(grantPath(grantId, "freezeState")),
       frozenGrants: () => raw.smembers(`${base}:frozenGrants`),
@@ -1685,7 +1691,7 @@ describe.each(harnesses(10))("requestLimit scenarios — $name", (harness) => {
         // An explicit balance, because an untouched bucket initialises itself to
         // `maxTokens` — which after the raise below would be enough to admit the
         // head, and this test is about pricing it, not about serving it.
-        await ctx.backend.resetTokenBucket(`${base}:rateLimit`, 5);
+        await ctx.backend.resetTokenBucket(`${base}:rateLimit:default`, 5);
         await ctx.backend.addRequest(queueKey, prefix, {
           requestId: "skipped",
           clientName: CLIENT,
@@ -1705,7 +1711,7 @@ describe.each(harnesses(10))("requestLimit scenarios — $name", (harness) => {
               string,
               {
                 processRequests: () => Promise<void>;
-                rateLimit: Record<string, unknown>;
+                rateLimit: Record<string, unknown>[];
               }
             >;
           }
@@ -1720,12 +1726,15 @@ describe.each(harnesses(10))("requestLimit scenarios — $name", (harness) => {
 
         // Same client, same entry, a ceiling that now fits. One more pass is all
         // that should be needed for the head to be considered again.
-        client.rateLimit = {
-          type: "requestLimit",
-          interval: 60_000,
-          tokensToAdd: 5,
-          maxTokens: 20,
-        };
+        client.rateLimit = [
+          {
+            name: "default",
+            type: "requestLimit",
+            interval: 60_000,
+            tokensToAdd: 5,
+            maxTokens: 20,
+          },
+        ];
         await client.processRequests();
         // Priced, not admitted: 9 against the 5 tokens in the bucket is still a
         // decline. Reaching the bucket at all is the property.

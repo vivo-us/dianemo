@@ -858,7 +858,7 @@ for (const harness of harnesses(11)) {
                 clients: Map<
                   string,
                   {
-                    rateLimit: { maxTokens: number };
+                    rateLimit: { maxTokens: number }[];
                     updateRequestInQueue: (
                       id: string,
                       u: Record<string, unknown>
@@ -886,14 +886,17 @@ for (const harness of harnesses(11)) {
             const original = client.updateRequestInQueue.bind(client);
             let raised = false;
             client.updateRequestInQueue = async (id, updates) => {
-              if (!raised && client.rateLimit.maxTokens === 3) {
+              if (!raised && client.rateLimit[0].maxTokens === 3) {
                 raised = true;
-                client.rateLimit = {
-                  type: "requestLimit",
-                  maxTokens: 20,
-                  tokensToAdd: 20,
-                  interval: INTERVAL,
-                } as never;
+                client.rateLimit = [
+                  {
+                    name: "default",
+                    type: "requestLimit",
+                    maxTokens: 20,
+                    tokensToAdd: 20,
+                    interval: INTERVAL,
+                  },
+                ] as never;
               }
               return original(id, updates);
             };

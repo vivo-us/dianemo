@@ -171,7 +171,7 @@ describe.skipIf(!HAS_REDIS)("multi-replica rig", () => {
           await fire(replicas[0], client);
 
           const seenByPeer = await replicas[1].getClientStats(client);
-          expect(seenByPeer.rateLimit).toMatchObject({ tokens: 2 });
+          expect(seenByPeer.rateLimit[0]).toMatchObject({ tokens: 2 });
           expect(upstream.servedCount()).toBe(2);
         }
       );

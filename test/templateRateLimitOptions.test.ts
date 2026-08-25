@@ -1,3 +1,4 @@
+import type { NamedRateLimitData } from "../packages/core/src/client/types.js";
 import { memoryBackend } from "../packages/core/src/backend/memory.js";
 import { ConfigurationError } from "../packages/core/src/errors.js";
 import RequestHandler from "../packages/core/src/index.js";
@@ -92,8 +93,26 @@ async function build(
   };
 }
 
+/**
+ * A client's limits as the plan that produced them was written.
+ *
+ * Only the synthesised name comes off: a caller writing one unnamed limit is
+ * given `"default"` internally, and stripping a name the plan actually declared
+ * would make these assertions unable to tell one plan from another.
+ */
+const asDeclared = (limits: NamedRateLimitData[] | undefined) => {
+  if (!limits) return undefined;
+  if (limits.length === 1 && limits[0].name === "default") {
+    const { name: _name, ...bare } = limits[0];
+    return bare;
+  }
+  return limits;
+};
+
 const limitOf = (handler: RequestHandler) =>
-  handler.getLoadedClients().find((c) => c.name === "acme:_:a")?.rateLimit;
+  asDeclared(
+    handler.getLoadedClients().find((c) => c.name === "acme:_:a")?.rateLimit
+  );
 
 describe("rate limits a template offers its callers", () => {
   it("hands the builder the chosen plan's limit and its key", async () => {
@@ -396,7 +415,7 @@ describe("a plan that covers sub-clients", () => {
       handler
         .getLoadedClients()
         .filter((c) => c.name.startsWith("sp:_:a"))
-        .map((c) => [c.name, c.rateLimit])
+        .map((c) => [c.name, asDeclared(c.rateLimit)])
     );
 
   it("places a limit on the root and on every sub-client", async () => {

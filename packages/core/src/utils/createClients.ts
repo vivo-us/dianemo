@@ -1,13 +1,14 @@
-import ConcurrencyLimitClient from "../client/clientTypes/concurrencyLimitClient.js";
-import RequestLimitClient from "../client/clientTypes/requestLimitClient.js";
 import SharedLimitClient from "../client/clientTypes/sharedLimitClient.js";
-import MultiLimitClient from "../client/clientTypes/multiLimitClient.js";
+import { isSharedLimitOnly, normalizeRateLimit } from "./rateLimit.js";
 import { ClientConflictError, ConfigurationError } from "../errors.js";
-import { isMultiRateLimit, isSharedLimitOnly } from "./rateLimit.js";
-import NoLimitClient from "../client/clientTypes/noLimitClient.js";
+import MeteredClient from "../client/clientTypes/meteredClient.js";
 import type BaseClient from "../client/index.js";
 import type RequestHandler from "../index.js";
-import type { CreateClientData, RateLimitConfig } from "../client/types.js";
+import type {
+  CreateClientData,
+  RateLimitConfig,
+  SharedLimitClientOptions,
+} from "../client/types.js";
 
 /**
  * Recursively collects all client names that a list of CreateClientData will produce,
@@ -234,89 +235,52 @@ export async function createClient(
   }
   const rateLimit = declared as RateLimitConfig;
 
-  // A lone `sharedLimit` is the same client either way it is written, so the
-  // array form is unwrapped rather than given a second implementation. Combining
-  // one with other limits is refused by `assertUsableRateLimits`.
-  const declaredLimits = isMultiRateLimit(rateLimit) ? rateLimit : [rateLimit];
-  if (isMultiRateLimit(rateLimit) && !isSharedLimitOnly(rateLimit)) {
-    const mlClient = new MultiLimitClient(baseData, rateLimit);
-    this.clients.set(data.name, attachReconcile(mlClient));
-    await mlClient.init();
+  // Normalised once, here, so nothing past this point has to ask which of the two
+  // declared shapes it was handed.
+  const limits = normalizeRateLimit(rateLimit);
+
+  if (!isSharedLimitOnly(limits)) {
+    const client = new MeteredClient(baseData, limits);
+    this.clients.set(data.name, attachReconcile(client));
+    await client.init();
     this.emitter.emit(`clientRegistered:${data.name}`);
     return;
   }
-  const soleLimit = declaredLimits[0];
 
-  switch (soleLimit.type) {
-    case "requestLimit": {
-      const rlClient = new RequestLimitClient(baseData, soleLimit);
-      this.clients.set(data.name, attachReconcile(rlClient));
-      await rlClient.init();
-      break;
-    }
-    case "concurrencyLimit": {
-      const clClient = new ConcurrencyLimitClient(baseData, soleLimit);
-      this.clients.set(data.name, attachReconcile(clClient));
-      await clClient.init();
-      break;
-    }
-    case "sharedLimit": {
-      // A child whose parent does not exist is forced to `worker` by the
-      // election and so is never drained by anyone: it accepts requests, sends
-      // none, and grows its queue by one permanent entry per request.
-      const parentName = soleLimit.clientName;
-      const parent = this.clients.get(parentName);
-      if (!parent) {
-        throw new ConfigurationError(
-          "shared_limit_parent_not_found",
-          `Client "${data.name}" shares the rate limit of "${parentName}", which is not registered. Register the parent client first — a sharedLimit client cannot draw on a budget that does not exist.`
-        );
-      }
-      // A multi-limit owner is fine: this client takes the owner's queue as its
-      // own, so the owner's controller is what claims the budgets — all of them,
-      // however many the owner declares.
-      const parentLimit = parent.getRateLimit();
-      if (isSharedLimitOnly(parentLimit)) {
-        throw new ConfigurationError(
-          "shared_limit_parent_is_shared",
-          `Client "${data.name}" shares the rate limit of "${parentName}", which is itself a sharedLimit client. Point it at the client that owns the budget.`
-        );
-      }
-      const slClient = new SharedLimitClient(baseData, soleLimit);
-      // So the child can reject an oversized cost against its parent's ceiling.
-      slClient.getParentRateLimit = () =>
-        this.clients.get(parentName)?.getRateLimit();
-      // Grant isolation splits the budget keys, and the budget is the parent's.
-      // Answering from the child's own auth config would have a differently
-      // authenticated child resolve the un-isolated key while the parent
-      // resolved an isolated one, so grant traffic would stop being shared.
-      slClient.getBudgetOwnerAuthData = () =>
-        this.clients.get(parentName)?.getAuthData();
-      slClient.getBudgetOwnerClient = () => this.clients.get(parentName);
-      this.clients.set(data.name, attachReconcile(slClient));
-      await slClient.init();
-      break;
-    }
-    case "noLimit": {
-      const nlClient = new NoLimitClient(baseData, soleLimit);
-      this.clients.set(data.name, attachReconcile(nlClient));
-      await nlClient.init();
-      break;
-    }
-    default: {
-      // A NAMED type we do not recognise. Silently falling back to noLimit
-      // removes the cap: TypeScript covers hand-written config, but overrides
-      // come back from the backend as untyped JSON and template builders are
-      // routinely fed database rows, so a typo reaches here at runtime with the
-      // limit intact in the caller's mind and absent in fact.
-      throw new ConfigurationError(
-        "unknown_rate_limit_type",
-        `Client "${data.name}" has an unrecognised rateLimit.type ${JSON.stringify(
-          (soleLimit as { type?: unknown }).type
-        )}. Expected one of: requestLimit, concurrencyLimit, sharedLimit, noLimit.`
-      );
-    }
+  // A child whose owner does not exist is forced to `worker` by the election and
+  // so is never drained by anyone: it accepts requests, sends none, and grows its
+  // queue by one permanent entry per request.
+  const shared = limits[0] as SharedLimitClientOptions & { name: string };
+  const parentName = shared.clientName;
+  const parent = this.clients.get(parentName);
+  if (!parent) {
+    throw new ConfigurationError(
+      "shared_limit_parent_not_found",
+      `Client "${data.name}" shares the rate limit of "${parentName}", which is not registered. Register the parent client first — a sharedLimit client cannot draw on a budget that does not exist.`
+    );
   }
+  // A multi-limit owner is fine: this client takes the owner's queue as its own,
+  // so the owner's controller is what claims the budgets — all of them, however
+  // many the owner declares.
+  if (isSharedLimitOnly(parent.getRateLimit())) {
+    throw new ConfigurationError(
+      "shared_limit_parent_is_shared",
+      `Client "${data.name}" shares the rate limit of "${parentName}", which is itself a sharedLimit client. Point it at the client that owns the budget.`
+    );
+  }
+  const slClient = new SharedLimitClient(baseData, limits);
+  // So the child can reject an oversized cost against its parent's ceiling.
+  slClient.getParentRateLimit = () =>
+    this.clients.get(parentName)?.getRateLimit();
+  // Grant isolation splits the budget keys, and the budget is the parent's.
+  // Answering from the child's own auth config would have a differently
+  // authenticated child resolve the un-isolated key while the parent resolved an
+  // isolated one, so grant traffic would stop being shared.
+  slClient.getBudgetOwnerAuthData = () =>
+    this.clients.get(parentName)?.getAuthData();
+  slClient.getBudgetOwnerClient = () => this.clients.get(parentName);
+  this.clients.set(data.name, attachReconcile(slClient));
+  await slClient.init();
 
   this.emitter.emit(`clientRegistered:${data.name}`);
 }

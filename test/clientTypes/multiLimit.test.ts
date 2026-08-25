@@ -291,12 +291,12 @@ describe.each(harnesses(4))("multiLimit — $name", (harness) => {
         url: "/",
       });
 
-      const stats = await handler.getClientStats(CLIENT);
-      expect(stats.rateLimit.type).toBe("multiLimit");
-      const limits =
-        stats.rateLimit.type === "multiLimit" ? stats.rateLimit.limits : [];
-      expect(limits.map((l) => l.name)).toEqual(["per_second", "per_window"]);
-      const window = limits.find((l) => l.name === "per_window");
+      const { rateLimit } = await handler.getClientStats(CLIENT);
+      expect(rateLimit.map((l) => l.name)).toEqual([
+        "per_second",
+        "per_window",
+      ]);
+      const window = rateLimit.find((l) => l.name === "per_window");
       expect(window && "tokens" in window ? window.tokens : undefined).toBe(5);
     });
   }, 30_000);

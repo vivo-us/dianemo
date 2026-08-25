@@ -506,7 +506,7 @@ describe.skipIf(!HAS_REDIS)("multi-replica failover", () => {
           expect(tally.ok).toBe(served);
 
           const stats = await worker.getClientStats(client);
-          expect(stats.rateLimit).toMatchObject({ tokens: 0 });
+          expect(stats.rateLimit[0]).toMatchObject({ tokens: 0 });
         }
       );
     } finally {
@@ -837,7 +837,7 @@ describe.skipIf(!HAS_REDIS)("multi-replica failover", () => {
           if (!controller) return;
           const worker = workersFor(client)[0];
           const namespace = controller.getNamespace();
-          const slotsKey = `${namespace}:${client}:concurrency`;
+          const slotsKey = `${namespace}:${client}:concurrency:default`;
           const queueKey = queueKeyFor(controller, client);
 
           const fireTo = (handler: RequestHandler, url: string) =>
@@ -906,11 +906,21 @@ describe.skipIf(!HAS_REDIS)("multi-replica failover", () => {
           );
           // The upstream never saw two at once.
           expect(upstream.peakInFlight()).toBe(1);
-          // B's orphaned entry is gone. C's is NOT: it is deliberately still
-          // open at the upstream, and an admitted request keeps its queue entry
-          // while it runs — asserting an empty queue here measured C rather than
-          // the reclamation this test is about.
-          expect(await raw.zrange(queueKey, 0, -1)).not.toContain(requestId);
+          // B's orphaned entry is reclaimed. C's is NOT: it is deliberately
+          // still open at the upstream, and an admitted request keeps its queue
+          // entry while it runs — asserting an empty queue here would measure C
+          // rather than the reclamation this test is about.
+          //
+          // Awaited rather than sampled: `forceOrphanCleanup` publishes, and the
+          // sweep it wakes runs on the controller's own schedule. Reading the
+          // queue at one instant asserts *when* cleanup ran, which is not a
+          // property this library offers — only that it does.
+          await waitFor(
+            "B's orphaned entry to be reclaimed",
+            async () => !(await raw.zrange(queueKey, 0, -1)).includes(requestId)
+          );
+          // And C's survives it, which is the half a blanket sweep would break.
+          expect(await raw.zrange(queueKey, 0, -1)).toHaveLength(1);
 
           upstream.release();
           await c;
@@ -1039,7 +1049,7 @@ describe.skipIf(!HAS_REDIS)("multi-replica failover", () => {
           if (!controller) return;
           const worker = workersFor(client)[0];
           const namespace = controller.getNamespace();
-          const concurrencyKey = `${namespace}:${client}:concurrency`;
+          const concurrencyKey = `${namespace}:${client}:concurrency:default`;
           const queueKey = queueKeyFor(controller, client);
 
           const tally = { ok: 0, failed: 0, statuses: [] as number[] };
