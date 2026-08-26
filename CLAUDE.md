@@ -4,6 +4,18 @@ A host for outbound HTTP clients that share a rate limit across processes. `pack
 the handler, clients and the in-memory backend; `packages/backend-redis` holds the Redis one.
 Both backends implement `DianemoBackend` and must stay semantically identical.
 
+## Skills
+
+Three skills in `.claude/skills/` carry the detail this file only summarises. Load the one
+that fits rather than working from memory:
+
+- **`typescript-conventions`** — declaration style, file size, the twin rule between the two
+  backends, error classes and their `code` strings, where shared code lives.
+- **`pre-commit-checks`** — the full command sequence, what each command does *not* cover,
+  and the two ways a green local run differs from CI.
+- **`pull-requests`** — title format, branch naming, the body shape this repo uses, and the
+  version plan CI demands.
+
 ## Comments — read `CONTRIBUTING.md` before adding one
 
 `CONTRIBUTING.md` has the full criteria with examples. The short version:
@@ -43,6 +55,10 @@ npm test && npm run check && npm run lint && npm run format && npm run sort-impo
 `npm run build` must also pass. Redis-backed suites skip without a local Redis; CI runs them
 against a real one. Import order is enforced by `scripts/sort-imports.mjs`, so run
 `npm run sort-imports` rather than hand-ordering imports.
+
+Two things that line does not do: `npm test` omits `--typecheck`, so the type-level suite CI
+runs never executes, and without `REDIS_URL` a green run is 112 tests short. Before pushing,
+load `pre-commit-checks` — it owns the full sequence and the reasons for its order.
 
 Prettier owns formatting — do not hand-wrap code to a column. Comment prose is not prettier's
 business, so wrap that at 80 columns by hand to match the surrounding files.
