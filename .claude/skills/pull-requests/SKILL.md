@@ -77,19 +77,24 @@ rollout. That is a data-plane incident, not a note.
 
 ## The body
 
-**There is no PR template in this repo.** PR #1 is the working model, and its shape is
-worth following because it is organised around what a reviewer has to decide:
+Follow `.github/pull_request_template.md`. GitHub pre-fills it, so the sections arrive with
+you; **delete a heading you have nothing for** rather than writing "N/A" — an empty heading
+is what makes a template rot.
 
-### Opening paragraph
+The template is the checklist. What follows is how each section is written here, and PR #1
+is the worked example — its shape is organised around what a reviewer has to decide.
+
+### Description — the gist
 
 What this is and what standard it was held to. One or two sentences — "Two features, and
 the simplification they made possible. Four commits, each verified against a real Redis
 before the next was built on it." A reviewer should know what they are about to look at and
 how much to trust it.
 
-### One `##` section per theme
+### Changes — one theme per section
 
-Not per file and not per commit. Each section says what changed and **why this way**, and
+Not per file and not per commit. A change with two or three themes gets a `###` under this
+heading for each; a small one gets bullets. Each says what changed and **why this way**, and
 names the alternative that was rejected where there was one. This is the part a reviewer
 actually works from, so put the reasoning that is not visible in the diff here:
 
@@ -99,13 +104,13 @@ actually works from, so put the reasoning that is not visible in the diff here:
 A table earns its place when a change has a measurable shape — line counts before and after,
 classes removed, an operation's cost. Prose earns it the rest of the time.
 
-### `## Breaking changes`
+### Breaking changes
 
 One bullet per break, each saying what a consumer must do. State the version each package
 goes to. Repeat the rolling-deploy warning here if there is one; a reader who skips the
 version plan must not miss it.
 
-### `## Verification`
+### Verification
 
 What you ran, and what you could not:
 
@@ -120,15 +125,17 @@ What you ran, and what you could not:
 - What you could not exercise. An unverified path stated plainly is useful; an unverified
   path presented as tested is the failure mode with teeth.
 
-### Optional sections that pull their weight
+### Additional notes
 
-- **`## Also fixed in passing`** — drive-by fixes, so a reviewer knows they are not part of
-  the main thrust.
-- **`## Left alone deliberately`** — the related-looking thing you did not touch, and why.
+Everything that is not a change. Give each a bold lead-in, and promote one to its own `###`
+when it is substantial enough to be looked for:
+
+- **Also fixed in passing** — drive-by fixes, so a reviewer knows they are not part of the
+  main thrust.
+- **Left alone deliberately** — the related-looking thing you did not touch, and why.
 - **Convention changed** — a house rule this PR establishes or alters. If it belongs in
-  `CLAUDE.md`, `CONTRIBUTING.md` or a skill, change it in this PR rather than promising to.
-
-Delete a heading you have nothing for rather than writing "N/A".
+  `CLAUDE.md`, `CONTRIBUTING.md`, a skill or this template, change it in this PR rather
+  than promising to.
 
 ## What reviewers here look for specifically
 
